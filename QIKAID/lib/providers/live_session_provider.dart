@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/websocket_service.dart';
-import '../services/audio_recording_service.dart';
+import '../services/audio_recording_service_v2.dart';
 
 /// Live session state
 class LiveSessionState {
@@ -54,6 +54,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   StreamSubscription? _wsErrorSubscription;
   StreamSubscription? _wsConnectionSubscription;
   StreamSubscription? _audioDataSubscription;
+  StreamSubscription? _liveFrameSubscription;
   StreamSubscription? _audioStateSubscription;
   
   LiveSessionNotifier(
@@ -69,10 +70,13 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       print('🎯 LIVE SESSION: Initializing live session services...');
       
       // Initialize audio recording service
-      final audioInitialized = await _audioRecordingService.initialize();
-      if (!audioInitialized) {
+      try {
+        await _audioRecordingService.initialize();
+        print('✅ LIVE SESSION: Audio recording service initialized');
+      } catch (e) {
+        print('❌ LIVE SESSION: Audio initialization failed: $e');
         state = state.copyWith(
-          error: 'Failed to initialize audio recording service',
+          error: 'Failed to initialize audio recording service: $e',
         );
         return;
       }
@@ -83,7 +87,8 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       _wsConnectionSubscription = _webSocketService.connectionStream.listen(_onWebSocketConnection);
       
       // Set up audio recording listeners
-      _audioDataSubscription = _audioRecordingService.audioDataStream.listen(_onAudioData);
+      // Dual-lane audio streaming: utterances + live frames
+      _audioDataSubscription = _audioRecordingService.utteranceStream.listen(_onUtteranceData);
       _audioStateSubscription = _audioRecordingService.stateStream.listen(_onAudioState);
       
       state = state.copyWith(isInitialized: true);
@@ -139,25 +144,30 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     try {
       print('🎯 LIVE SESSION: Starting live session...');
       
-      // For testing purposes, allow starting without WebSocket connection
-      // In production, you would require a connection
-      if (!state.isConnected) {
+      // Start audio streaming session if connected
+      if (state.isConnected) {
+        await _webSocketService.startAudioStreaming(
+          languageCode: 'en-US',
+          speakerName: 'User',
+        );
+      } else {
         print('⚠️ LIVE SESSION: Starting in offline mode (no WebSocket connection)');
         print('🎤 LIVE SESSION: This is for testing microphone functionality only');
       }
       
       // Start audio recording
-      final recordingStarted = await _audioRecordingService.startRecording();
-      if (recordingStarted) {
-        state = state.copyWith(isRecording: true, error: null);
-        print('✅ LIVE SESSION: Live session started successfully');
-        print('🎤 LIVE SESSION: Microphone is now active and recording audio');
-        return true;
-      } else {
-        print('❌ LIVE SESSION: Failed to start recording');
-        state = state.copyWith(error: 'Failed to start audio recording');
-        return false;
-      }
+      await _audioRecordingService.startRecording();
+      
+      // Subscribe to dual-lane audio streams
+      _audioDataSubscription = _audioRecordingService.utteranceStream.listen(_onUtteranceData);
+      _liveFrameSubscription = _audioRecordingService.liveFrameStream.listen(_onLiveFrameData);
+      
+      state = state.copyWith(isRecording: true, error: null);
+      print('✅ LIVE SESSION: Live session started successfully');
+      print('🎤 LIVE SESSION: Dual-lane audio streaming active');
+      print('   - Lane 1: Live frames (20ms) for real-time captions');
+      print('   - Lane 2: VAD utterances for complete sentences');
+      return true;
     } catch (e) {
       print('❌ LIVE SESSION START ERROR: $e');
       state = state.copyWith(error: 'Failed to start live session: $e');
@@ -169,6 +179,15 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   Future<void> stopSession() async {
     try {
       print('🎯 LIVE SESSION: Stopping live session...');
+      
+      // Cancel subscriptions
+      _audioDataSubscription?.cancel();
+      _liveFrameSubscription?.cancel();
+      
+      // Stop audio streaming session if connected
+      if (state.isConnected) {
+        await _webSocketService.stopAudioStreaming();
+      }
       
       // Stop audio recording
       await _audioRecordingService.stopRecording();
@@ -264,26 +283,56 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     state = state.copyWith(isConnected: isConnected);
   }
   
-  /// Handle audio data
-  void _onAudioData(Uint8List audioData) {
+  /// Handle utterance data (complete sentences)
+  void _onUtteranceData(Uint8List audioData) {
     try {
-      print('🎯 LIVE SESSION: Processing audio data (${audioData.length} bytes)');
+      print('🎯 LIVE SESSION: Processing utterance data (${audioData.length} bytes)');
       
       // Only send to WebSocket if connected
       if (state.isConnected) {
-        _webSocketService.sendAudioData(
-          audioData: audioData,
-          audioFormat: 'wav',
-          languageCode: 'en-US', // Default to English, can be made configurable
+        // Send utterance start marker
+        final utteranceId = 'utt-${DateTime.now().millisecondsSinceEpoch}';
+        _webSocketService.sendUtteranceStart(
+          utteranceId: utteranceId,
+          totalBytes: audioData.length,
         );
-        print('📤 LIVE SESSION: Audio data sent to WebSocket');
+        
+        // Send utterance data in chunks
+        _sendUtteranceInChunks(audioData);
+        
+        // Send utterance end marker
+        _webSocketService.sendUtteranceEnd();
+        
+        print('📤 LIVE SESSION: Utterance sent to WebSocket');
       } else {
-        print('🎤 LIVE SESSION: Audio data captured (offline mode - not sending to WebSocket)');
+        print('🎤 LIVE SESSION: Utterance captured (offline mode - not sending to WebSocket)');
         print('🎤 LIVE SESSION: Audio amplitude: ${_calculateAudioAmplitude(audioData).toStringAsFixed(4)}');
       }
       
     } catch (e) {
-      print('❌ LIVE SESSION AUDIO HANDLER ERROR: $e');
+      print('❌ LIVE SESSION UTTERANCE HANDLER ERROR: $e');
+    }
+  }
+  
+  /// Handle live frame data (20ms frames for real-time captions)
+  void _onLiveFrameData(Uint8List frameData) {
+    try {
+      if (state.isConnected) {
+        _webSocketService.sendPcmFrame(frameData);
+      }
+    } catch (e) {
+      print('❌ LIVE SESSION LIVE FRAME ERROR: $e');
+    }
+  }
+  
+  /// Send utterance data in chunks
+  void _sendUtteranceInChunks(Uint8List audioData) {
+    const chunkSize = 16 * 1024; // 16KB chunks
+    
+    for (var i = 0; i < audioData.length; i += chunkSize) {
+      final end = (i + chunkSize > audioData.length) ? audioData.length : i + chunkSize;
+      final chunk = Uint8List.sublistView(audioData, i, end);
+      _webSocketService.sendPcmFrame(chunk);
     }
   }
   
@@ -323,6 +372,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     _wsErrorSubscription?.cancel();
     _wsConnectionSubscription?.cancel();
     _audioDataSubscription?.cancel();
+    _liveFrameSubscription?.cancel();
     _audioStateSubscription?.cancel();
     
     _webSocketService.dispose();

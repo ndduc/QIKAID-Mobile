@@ -27,6 +27,14 @@ class WebSocketService {
   // Keep-alive timer
   Timer? _keepAliveTimer;
   
+  // Message buffering for split messages
+  String _messageBuffer = '';
+  bool _isReceivingPartialMessage = false;
+  
+  // Audio streaming state
+  bool _isStreamingStarted = false;
+  String? _currentUtteranceId;
+  
   // Getters
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<String> get errorStream => _errorController.stream;
@@ -61,14 +69,19 @@ class WebSocketService {
         print('🔌 WEBSOCKET: Connecting to: $wsUrl');
         
         // Connect to ngrok WebSocket with authentication
-        final authenticatedUriString = '$wsUrl?access_token=${Uri.encodeComponent(accessToken)}&cognitoId=${Uri.encodeComponent(cognitoId)}&userIdentifier=${Uri.encodeComponent('ndduc01@gmail.com')}';
+        final authenticatedUriString = '$wsUrl?access_token=${Uri.encodeComponent(accessToken)}&cognitoId=${Uri.encodeComponent(cognitoId)}&user_identifier=${Uri.encodeComponent('ndduc01@gmail.com')}&userIdForBinary=${Uri.encodeComponent('f798ed40-f850-41fd-9a65-4d787fa6a21d')}&profileIdForBinary=${Uri.encodeComponent('d479e65d-0f5a-4527-a473-203c9ce2062a')}';
         final authenticatedUri = Uri.parse(authenticatedUriString);
         
         print('🔌 WEBSOCKET: Connecting to ngrok WebSocket: $authenticatedUri');
         print('🔌 WEBSOCKET CONNECTION DETAILS:');
         print('   - Attempt: $attempt/3');
         print('   - URL: $authenticatedUri');
-        _channel = WebSocketChannel.connect(authenticatedUri);
+        
+        // Create WebSocket with custom configuration for larger messages
+        _channel = WebSocketChannel.connect(
+          authenticatedUri,
+          protocols: ['chat', 'superchat'],
+        );
         
         // Listen for messages
         _channel!.stream.listen(
@@ -119,7 +132,136 @@ class WebSocketService {
     return false;
   }
   
-  /// Send audio data to the WebSocket
+  /// Start audio streaming session
+  Future<void> startAudioStreaming({
+    String? languageCode,
+    String? speakerName,
+  }) async {
+    if (!_isConnected || _channel == null) {
+      print('❌ WEBSOCKET: Cannot start streaming - not connected');
+      return;
+    }
+    
+    if (_isStreamingStarted) {
+      print('⚠️ WEBSOCKET: Streaming already started');
+      return;
+    }
+    
+    try {
+      final startMessage = {
+        'type': 'start',
+        'encoding': 'LINEAR16',
+        'sampleRateHz': 16000,
+        'channels': 1,
+        'languageCode': languageCode ?? 'en-US',
+        'sessionId': _sessionId,
+        'timestamp': DateTime.now().toIso8601String(),
+        'cognitoId': cognitoId,
+        'userIdentifier': 'ndduc01@gmail.com',
+        'accessToken': accessToken,
+      };
+      
+      print('🎤 WEBSOCKET: Starting audio streaming session');
+      _channel!.sink.add(jsonEncode(startMessage));
+      _isStreamingStarted = true;
+      print('✅ WEBSOCKET: Audio streaming started');
+      
+    } catch (e) {
+      print('❌ WEBSOCKET START STREAMING ERROR: $e');
+      _errorController.add('Failed to start streaming: $e');
+    }
+  }
+  
+  /// Send PCM frame as binary data
+  Future<void> sendPcmFrame(Uint8List pcmFrame) async {
+    if (!_isConnected || _channel == null || !_isStreamingStarted) {
+      return;
+    }
+    
+    try {
+      // Send as binary frame
+      _channel!.sink.add(pcmFrame);
+    } catch (e) {
+      print('❌ WEBSOCKET PCM FRAME ERROR: $e');
+    }
+  }
+  
+  /// Send utterance start marker
+  Future<void> sendUtteranceStart({
+    required String utteranceId,
+    required int totalBytes,
+  }) async {
+    if (!_isConnected || _channel == null) {
+      return;
+    }
+    
+    try {
+      final message = {
+        'type': 'utterance_start',
+        'utteranceId': utteranceId,
+        'contentType': 'audio/L16;rate=16000;channels=1',
+        'totalBytes': totalBytes,
+        'timestamp': DateTime.now().toIso8601String(),
+        'sessionId': _sessionId,
+      };
+      
+      print('🎤 WEBSOCKET: Starting utterance $utteranceId ($totalBytes bytes)');
+      _channel!.sink.add(jsonEncode(message));
+      _currentUtteranceId = utteranceId;
+      
+    } catch (e) {
+      print('❌ WEBSOCKET UTTERANCE START ERROR: $e');
+    }
+  }
+  
+  /// Send utterance end marker
+  Future<void> sendUtteranceEnd() async {
+    if (!_isConnected || _channel == null || _currentUtteranceId == null) {
+      return;
+    }
+    
+    try {
+      final message = {
+        'type': 'utterance_end',
+        'utteranceId': _currentUtteranceId,
+        'timestamp': DateTime.now().toIso8601String(),
+        'sessionId': _sessionId,
+      };
+      
+      print('🎤 WEBSOCKET: Ending utterance $_currentUtteranceId');
+      _channel!.sink.add(jsonEncode(message));
+      _currentUtteranceId = null;
+      
+    } catch (e) {
+      print('❌ WEBSOCKET UTTERANCE END ERROR: $e');
+    }
+  }
+  
+  /// Stop audio streaming session
+  Future<void> stopAudioStreaming() async {
+    if (!_isConnected || _channel == null || !_isStreamingStarted) {
+      return;
+    }
+    
+    try {
+      final stopMessage = {
+        'type': 'stop',
+        'timestamp': DateTime.now().toIso8601String(),
+        'sessionId': _sessionId,
+      };
+      
+      print('🎤 WEBSOCKET: Stopping audio streaming session');
+      _channel!.sink.add(jsonEncode(stopMessage));
+      _isStreamingStarted = false;
+      _currentUtteranceId = null;
+      print('✅ WEBSOCKET: Audio streaming stopped');
+      
+    } catch (e) {
+      print('❌ WEBSOCKET STOP STREAMING ERROR: $e');
+    }
+  }
+
+  /// Send audio data to the WebSocket (legacy method - kept for compatibility)
   Future<void> sendAudioData({
     required Uint8List audioData,
     required String audioFormat,
@@ -230,10 +372,10 @@ class WebSocketService {
     }
   }
   
-  /// Handle incoming messages
+  /// Handle incoming messages with chunking support
   void _onMessage(dynamic message) {
     try {
-      print('📨 WEBSOCKET: Received message');
+      print('📨 WEBSOCKET: Received message (${message.toString().length} chars)');
       
       // Mark as connected when we receive the first message
       if (!_isConnected) {
@@ -242,7 +384,28 @@ class WebSocketService {
         print('✅ WEBSOCKET: Connection established (first message received)');
       }
       
-      final Map<String, dynamic> data = jsonDecode(message);
+      // Handle message chunking
+      String messageStr = message.toString();
+      
+      // Check if this is a partial message (doesn't end with } or ])
+      if (!messageStr.trim().endsWith('}') && !messageStr.trim().endsWith(']')) {
+        print('📨 WEBSOCKET: Received partial message, buffering...');
+        _messageBuffer += messageStr;
+        _isReceivingPartialMessage = true;
+        return;
+      }
+      
+      // If we were receiving a partial message, combine with buffer
+      if (_isReceivingPartialMessage) {
+        print('📨 WEBSOCKET: Completing buffered message...');
+        messageStr = _messageBuffer + messageStr;
+        _messageBuffer = '';
+        _isReceivingPartialMessage = false;
+      }
+      
+      print('📨 WEBSOCKET: Processing complete message (${messageStr.length} chars)');
+      
+      final Map<String, dynamic> data = jsonDecode(messageStr);
       print('📨 WEBSOCKET: Message type: ${data['type']}');
       
       // Handle different message types
@@ -265,7 +428,12 @@ class WebSocketService {
       
     } catch (e) {
       print('❌ WEBSOCKET MESSAGE PARSE ERROR: $e');
+      print('❌ WEBSOCKET: Raw message: ${message.toString()}');
       _errorController.add('Failed to parse message: $e');
+      
+      // Reset buffer on error
+      _messageBuffer = '';
+      _isReceivingPartialMessage = false;
     }
   }
   
@@ -339,6 +507,11 @@ class WebSocketService {
     try {
       print('🔌 WEBSOCKET: Disconnecting...');
       
+      // Stop audio streaming first
+      if (_isStreamingStarted) {
+        await stopAudioStreaming();
+      }
+      
       // Stop keep-alive
       _stopKeepAlive();
       
@@ -348,6 +521,8 @@ class WebSocketService {
       }
       
       _isConnected = false;
+      _isStreamingStarted = false;
+      _currentUtteranceId = null;
       _connectionController.add(false);
       
       print('✅ WEBSOCKET: Disconnected successfully');

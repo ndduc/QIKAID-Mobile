@@ -1,12 +1,20 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class AudioRecordingService {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  // Public stream: emits only aggregated utterances (complete sentences)
   StreamController<Uint8List> _audioDataController = 
+      StreamController<Uint8List>.broadcast();
+  // Internal stream: receives raw mic frames from the recorder
+  StreamController<Uint8List> _micFrameController = 
+      StreamController<Uint8List>.broadcast();
+  // Optional public stream for completed utterances (if needed by UI)
+  StreamController<Uint8List> _utteranceController = 
       StreamController<Uint8List>.broadcast();
   StreamController<RecordingState> _stateController = 
       StreamController<RecordingState>.broadcast();
@@ -20,15 +28,20 @@ class AudioRecordingService {
   List<Uint8List> _audioBuffer = [];
   bool _isSpeaking = false;
   bool _hasSpeechStarted = false;
+  Timer? _maxSpeechTimer; // Timer to force send after max speech duration
   
   // Configuration
   static const int _chunkDurationMs = 200; // Process audio every 200ms for VAD
-  static const int _silenceTimeoutMs = 1500; // 1.5 seconds of silence = sentence end
-  static const double _speechThreshold = 0.01; // Volume threshold for speech detection
+  static const int _silenceTimeoutMs = 1000; // 1 second of silence = sentence end
+  static const int _maxSpeechDurationMs = 5000; // Force send after 5 seconds of continuous speech
+  static const double _speechThreshold = 0.02; // RMS threshold for speech detection
   static const int _sampleRate = 16000;
   
   // Getters
+  // Raw mic frames (use this for real-time streaming to WS)
   Stream<Uint8List> get audioDataStream => _audioDataController.stream;
+  // Completed utterances after VAD segmentation (optional consumer)
+  Stream<Uint8List> get utteranceStream => _utteranceController.stream;
   Stream<RecordingState> get stateStream => _stateController.stream;
   bool get isRecording => _isRecording;
   bool get isInitialized => _isInitialized;
@@ -50,8 +63,8 @@ class AudioRecordingService {
       await _recorder.openRecorder();
       print('✅ AUDIO RECORDING: Recorder opened successfully');
       
-      // Set up audio data stream listener
-      _audioDataController.stream.listen((audioData) {
+      // Listen to raw mic frames and run VAD/segmentation
+      _micFrameController.stream.listen((audioData) {
         _processRealTimeAudioData(audioData);
       });
       
@@ -88,8 +101,8 @@ class AudioRecordingService {
       
       // Start recording with real microphone
       await _recorder.startRecorder(
-        toStream: _audioDataController,
-        codec: Codec.pcm16WAV,
+        toStream: _micFrameController,
+        codec: Codec.pcm16, // raw PCM frames, no per-chunk WAV headers
         sampleRate: _sampleRate,
       );
       
@@ -126,10 +139,17 @@ class AudioRecordingService {
       _silenceTimer?.cancel();
       _silenceTimer = null;
       
-      // Send any remaining buffered audio
+      // Stop max speech timer
+      _maxSpeechTimer?.cancel();
+      _maxSpeechTimer = null;
+      
+      // Send any remaining buffered audio (final sentence)
       if (_hasSpeechStarted && _audioBuffer.isNotEmpty) {
         print('📤 AUDIO RECORDING: Sending final buffered audio before stopping');
         _sendBufferedAudio();
+        // Reset state after sending final audio
+        _hasSpeechStarted = false;
+        _audioBuffer.clear();
       }
       
       // Stop recording
@@ -199,21 +219,22 @@ class AudioRecordingService {
   
   /// Detect speech in audio data
   bool _detectSpeech(Uint8List audioData) {
-    // Simple volume-based speech detection
-    // In a real implementation, you would use more sophisticated VAD algorithms
-    
-    double sum = 0;
-    for (int i = 0; i < audioData.length; i += 2) {
-      // Convert 16-bit samples to amplitude
-      final sample = (audioData[i] | (audioData[i + 1] << 8));
-      final amplitude = (sample - 32768) / 32768.0; // Normalize to -1.0 to 1.0
-      sum += amplitude.abs();
+    // RMS-based speech detection on signed 16-bit PCM (little-endian)
+    double sumSquares = 0.0;
+    int sampleCount = audioData.length ~/ 2;
+    for (int i = 0; i + 1 < audioData.length; i += 2) {
+      int lo = audioData[i];
+      int hi = audioData[i + 1];
+      int sample = (hi << 8) | lo; // little-endian
+      if ((sample & 0x8000) != 0) {
+        sample = sample - 0x10000; // convert to signed 16-bit
+      }
+      double normalized = sample / 32768.0; // -1.0..+1.0
+      sumSquares += normalized * normalized;
     }
-    
-    final averageAmplitude = sum / (audioData.length / 2);
-    final hasSpeech = averageAmplitude > _speechThreshold;
-    
-    print('🎤 AUDIO RECORDING: Audio amplitude: ${averageAmplitude.toStringAsFixed(4)}, Speech: $hasSpeech');
+    double rms = sampleCount > 0 ? sqrt(sumSquares / sampleCount) : 0.0;
+    bool hasSpeech = rms > _speechThreshold;
+    print('🎤 AUDIO RECORDING: RMS: ${rms.toStringAsFixed(4)}, Speech: $hasSpeech');
     return hasSpeech;
   }
   
@@ -224,6 +245,21 @@ class AudioRecordingService {
       _isSpeaking = true;
       _hasSpeechStarted = true;
       _audioBuffer.clear();
+      
+      // Start max speech timer to force send after continuous speech
+      _maxSpeechTimer = Timer(
+        Duration(milliseconds: _maxSpeechDurationMs),
+        () {
+          if (_hasSpeechStarted && _audioBuffer.isNotEmpty) {
+            print('📤 AUDIO RECORDING: Force sending after ${_maxSpeechDurationMs}ms of continuous speech');
+            _sendBufferedAudio();
+            // Reset for next sentence - continue listening
+            _hasSpeechStarted = false;
+            _audioBuffer.clear();
+            _isSpeaking = false;
+          }
+        },
+      );
     }
     
     // Add audio to buffer
@@ -239,12 +275,20 @@ class AudioRecordingService {
       print('🔇 AUDIO RECORDING: Speech ended, starting silence timer');
       _isSpeaking = false;
       
+      // Cancel max speech timer since we detected silence
+      _maxSpeechTimer?.cancel();
+      _maxSpeechTimer = null;
+      
       // Start silence timer - if no speech for timeout period, send buffered audio
       _silenceTimer = Timer(
         Duration(milliseconds: _silenceTimeoutMs),
         () {
           if (_hasSpeechStarted && _audioBuffer.isNotEmpty) {
+            print('📤 AUDIO RECORDING: Sending complete sentence after ${_silenceTimeoutMs}ms silence');
             _sendBufferedAudio();
+            // Reset for next sentence - continue listening
+            _hasSpeechStarted = false;
+            _audioBuffer.clear();
           }
         },
       );
@@ -256,7 +300,7 @@ class AudioRecordingService {
     try {
       if (_audioBuffer.isEmpty) return;
       
-      print('📤 AUDIO RECORDING: Sending complete sentence (${_audioBuffer.length} chunks)');
+      print('📤 AUDIO RECORDING: Sending complete sentence (${_audioBuffer.length} chunks, ${_audioBuffer.fold<int>(0, (sum, chunk) => sum + chunk.length)} bytes)');
       
       // Combine all buffered audio chunks
       final totalLength = _audioBuffer.fold<int>(0, (sum, chunk) => sum + chunk.length);
@@ -268,12 +312,11 @@ class AudioRecordingService {
         offset += chunk.length;
       }
       
-      // Send the complete sentence
-      _audioDataController.add(combinedAudio);
-      
-      // Reset for next sentence
-      _audioBuffer.clear();
-      _hasSpeechStarted = false;
+      // Wrap the combined raw PCM into a single WAV with one header
+      final wavBytes = _wrapPcmAsWav(combinedAudio, _sampleRate, numChannels: 1);
+
+      // Emit the complete sentence WAV to the utterance stream
+      _utteranceController.add(wavBytes);
       
       print('✅ AUDIO RECORDING: Complete sentence sent (${combinedAudio.length} bytes)');
       
@@ -341,6 +384,8 @@ class AudioRecordingService {
   Future<void> dispose() async {
     try {
       await stopRecording();
+      await _micFrameController.close();
+      await _utteranceController.close();
       await _audioDataController.close();
       await _stateController.close();
       await _recorder.closeRecorder();
@@ -348,6 +393,45 @@ class AudioRecordingService {
     } catch (e) {
       print('❌ AUDIO RECORDING DISPOSE ERROR: $e');
     }
+  }
+
+  /// Create a minimal WAV header and prepend to PCM16LE mono data
+  Uint8List _wrapPcmAsWav(Uint8List pcm, int sampleRate, {int numChannels = 1, int bitsPerSample = 16}) {
+    final byteRate = sampleRate * numChannels * (bitsPerSample ~/ 8);
+    final blockAlign = numChannels * (bitsPerSample ~/ 8);
+    final subchunk2Size = pcm.length;
+    final chunkSize = 36 + subchunk2Size;
+
+    final header = BytesBuilder();
+    // RIFF chunk descriptor
+    header.add(ascii.encode('RIFF'));
+    header.add(_intToBytesLE(chunkSize, 4));
+    header.add(ascii.encode('WAVE'));
+    // fmt subchunk
+    header.add(ascii.encode('fmt '));
+    header.add(_intToBytesLE(16, 4)); // Subchunk1Size for PCM
+    header.add(_intToBytesLE(1, 2)); // AudioFormat = 1 (PCM)
+    header.add(_intToBytesLE(numChannels, 2));
+    header.add(_intToBytesLE(sampleRate, 4));
+    header.add(_intToBytesLE(byteRate, 4));
+    header.add(_intToBytesLE(blockAlign, 2));
+    header.add(_intToBytesLE(bitsPerSample, 2));
+    // data subchunk
+    header.add(ascii.encode('data'));
+    header.add(_intToBytesLE(subchunk2Size, 4));
+
+    final bytesBuilder = BytesBuilder();
+    bytesBuilder.add(header.toBytes());
+    bytesBuilder.add(pcm);
+    return bytesBuilder.toBytes();
+  }
+
+  Uint8List _intToBytesLE(int value, int byteCount) {
+    final bytes = Uint8List(byteCount);
+    for (int i = 0; i < byteCount; i++) {
+      bytes[i] = (value >> (8 * i)) & 0xFF;
+    }
+    return bytes;
   }
 }
 

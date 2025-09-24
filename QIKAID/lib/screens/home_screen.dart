@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/gradient_background.dart';
 import 'live_transcription_screen.dart';
+import 'audio_test_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -140,7 +141,7 @@ class HomeScreen extends ConsumerWidget {
                             builder: (context, constraints) {
                               // Calculate responsive grid based on screen width
                               final screenWidth = constraints.maxWidth;
-                              final crossAxisCount = screenWidth > 400 ? 2 : 2; // Always 2 columns for mobile
+                              final crossAxisCount = screenWidth > 600 ? 3 : 2; // 3 columns for larger screens, 2 for mobile
                               final spacing = screenWidth > 400 ? 12.0 : 8.0;
                               
                               return GridView.count(
@@ -176,6 +177,13 @@ class HomeScreen extends ConsumerWidget {
                                     subtitle: 'Preferences',
                                     color: const Color(0xFF805AD5),
                                     onTap: () => _showComingSoon(context, 'Settings'),
+                                  ),
+                                  _buildFeatureCard(
+                                    icon: Icons.science,
+                                    title: 'Audio Test',
+                                    subtitle: 'Test Dual-Lane\nAudio Streaming',
+                                    color: const Color(0xFFE53E3E),
+                                    onTap: () => _navigateToAudioTest(context),
                                   ),
                                 ],
                               );
@@ -269,6 +277,14 @@ class HomeScreen extends ConsumerWidget {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const LiveTranscriptionScreen(),
+      ),
+    );
+  }
+
+  void _navigateToAudioTest(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const AudioTestScreen(),
       ),
     );
   }
