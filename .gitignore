@@ -1,0 +1,69 @@
+# Flutter/Dart/Pub related
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+pubspec.lock
+
+# Build outputs
+build/
+ios/Flutter/Flutter.framework/
+ios/Flutter/Flutter.podspec
+ios/.symlinks/
+ios/Pods/
+ios/.flutter-plugins
+ios/.flutter-plugins-dependencies
+android/.gradle/
+android/app/build/
+web/.dart_tool/
+web/build/
+linux/build/
+macos/build/
+windows/build/
+*.lock
+
+# Dependency and environment files
+.env
+.env.*
+
+# VS Code
+.vscode/
+.idea/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Xcode
+ios/Runner.xcworkspace/
+xcuserdata/
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+
+# Android Studio
+*.iml
+.gradle/
+local.properties
+*.jks
+
+# Fastlane (optional)
+fastlane/report.xml
+fastlane/screenshots
+fastlane/test_output
+
+# Flutter generated
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-plugins-version
+.melos_tool/
+
+# Other
+*.log
+*.tmp
+
+# Optional: ignore test outputs
+coverage/
