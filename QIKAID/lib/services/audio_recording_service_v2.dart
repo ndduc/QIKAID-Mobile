@@ -141,7 +141,12 @@ class AudioRecordingService {
     
     while (buffer.length - offset >= _frameBytes) {
       final frame = Uint8List.sublistView(buffer, offset, offset + _frameBytes);
-      _liveFrameController.add(frame);
+      
+      // Only send live frames when speech is detected and frame is not silent
+      if (_isSpeaking && !_isSilentFrame(frame)) {
+        _liveFrameController.add(frame);
+      }
+      
       offset += _frameBytes;
     }
     
@@ -155,7 +160,7 @@ class AudioRecordingService {
     _updateVadState(isSpeech, pcmData);
   }
   
-  /// Calculate RMS and check against adaptive threshold
+  /// Calculate RMS and check against adaptive threshold with speech characteristics
   bool _rmsAboveAdaptiveThreshold(Uint8List pcmData) {
     final rms = _calculateRms(pcmData);
     
@@ -165,7 +170,14 @@ class AudioRecordingService {
     }
     
     final threshold = _noiseFloor * _speechMultiplier;
-    return rms > threshold;
+    final isAboveThreshold = rms > threshold;
+    
+    // Additional speech characteristics check (temporarily disabled)
+    // if (isAboveThreshold) {
+    //   return _hasSpeechCharacteristics(pcmData);
+    // }
+    
+    return isAboveThreshold;
   }
   
   /// Calculate RMS (Root Mean Square) of PCM data
@@ -229,7 +241,7 @@ class AudioRecordingService {
   
   /// Flush utterance buffer as complete sentence
   void _flushUtterance() {
-    if (_utteranceBuffer.isEmpty) return;
+    if (_utteranceBuffer.isEmpty || !_isSpeaking) return;
     
     try {
       // Combine all PCM chunks
@@ -330,6 +342,132 @@ class AudioRecordingService {
     } catch (e) {
       print('❌ AUDIO RECORDING: Dispose error: $e');
     }
+  }
+  
+  /// Analyze audio characteristics to distinguish speech from noise
+  bool _hasSpeechCharacteristics(Uint8List pcmData) {
+    if (pcmData.isEmpty) return false;
+    
+    // 1. Zero Crossing Rate (ZCR) - speech has moderate ZCR, noise has high ZCR
+    final zcr = _calculateZeroCrossingRate(pcmData);
+    if (zcr > 0.3) return false; // High ZCR indicates noise
+    
+    // 2. Spectral Centroid - speech has lower spectral centroid than noise
+    final spectralCentroid = _calculateSpectralCentroid(pcmData);
+    if (spectralCentroid > 2000) return false; // High frequency indicates noise
+    
+    // 3. Energy distribution - speech has more energy in lower frequencies
+    final energyRatio = _calculateLowHighEnergyRatio(pcmData);
+    if (energyRatio < 0.5) return false; // Low ratio indicates noise
+    
+    // 4. Temporal variation - speech has more variation than steady noise
+    final temporalVariation = _calculateTemporalVariation(pcmData);
+    if (temporalVariation < 0.1) return false; // Low variation indicates noise
+    
+    return true; // Passed all speech characteristic tests
+  }
+  
+  /// Calculate Zero Crossing Rate
+  double _calculateZeroCrossingRate(Uint8List pcmData) {
+    int crossings = 0;
+    for (int i = 1; i < pcmData.length - 1; i += 2) {
+      int current = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
+      if (current > 32767) current -= 65536;
+      
+      int previous = (pcmData[i - 1] & 0xFF) | ((pcmData[i] & 0xFF) << 8);
+      if (previous > 32767) previous -= 65536;
+      
+      if ((current >= 0) != (previous >= 0)) {
+        crossings++;
+      }
+    }
+    return crossings / (pcmData.length / 2);
+  }
+  
+  /// Calculate Spectral Centroid (simplified frequency analysis)
+  double _calculateSpectralCentroid(Uint8List pcmData) {
+    // Simplified frequency analysis using sample variation
+    double sum = 0;
+    double weightedSum = 0;
+    
+    for (int i = 0; i < pcmData.length - 1; i += 2) {
+      int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
+      if (sample > 32767) sample -= 65536;
+      
+      double magnitude = sample.abs().toDouble();
+      sum += magnitude;
+      weightedSum += magnitude * (i / 2); // Weight by sample position
+    }
+    
+    return sum > 0 ? weightedSum / sum : 0;
+  }
+  
+  /// Calculate Low/High frequency energy ratio
+  double _calculateLowHighEnergyRatio(Uint8List pcmData) {
+    double lowEnergy = 0;
+    double highEnergy = 0;
+    int halfLength = pcmData.length ~/ 2;
+    
+    // Low frequency (first half)
+    for (int i = 0; i < halfLength - 1; i += 2) {
+      int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
+      if (sample > 32767) sample -= 65536;
+      lowEnergy += sample * sample;
+    }
+    
+    // High frequency (second half)
+    for (int i = halfLength; i < pcmData.length - 1; i += 2) {
+      int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
+      if (sample > 32767) sample -= 65536;
+      highEnergy += sample * sample;
+    }
+    
+    return highEnergy > 0 ? lowEnergy / highEnergy : 1.0;
+  }
+  
+  /// Calculate temporal variation (variance in amplitude)
+  double _calculateTemporalVariation(Uint8List pcmData) {
+    if (pcmData.length < 4) return 0;
+    
+    List<double> amplitudes = [];
+    for (int i = 0; i < pcmData.length - 1; i += 2) {
+      int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
+      if (sample > 32767) sample -= 65536;
+      amplitudes.add(sample.abs().toDouble());
+    }
+    
+    if (amplitudes.isEmpty) return 0;
+    
+    double mean = amplitudes.reduce((a, b) => a + b) / amplitudes.length;
+    double variance = amplitudes.map((x) => pow(x - mean, 2)).reduce((a, b) => a + b) / amplitudes.length;
+    
+    return sqrt(variance) / mean; // Coefficient of variation
+  }
+  
+  /// Check if a frame is silent (all zeros or very low amplitude)
+  bool _isSilentFrame(Uint8List frame) {
+    if (frame.isEmpty) return true;
+    
+    // Calculate RMS (Root Mean Square) to detect silence
+    double sum = 0;
+    int sampleCount = 0;
+    
+    // Process 16-bit PCM samples (2 bytes per sample)
+    for (int i = 0; i < frame.length - 1; i += 2) {
+      // Convert bytes to 16-bit signed integer
+      int sample = (frame[i] & 0xFF) | ((frame[i + 1] & 0xFF) << 8);
+      if (sample > 32767) sample -= 65536; // Convert to signed
+      
+      sum += sample * sample;
+      sampleCount++;
+    }
+    
+    if (sampleCount == 0) return true;
+    
+    double rms = sqrt(sum / sampleCount);
+    double threshold = 100.0; // Same threshold as server-side
+    
+    return rms < threshold;
   }
 }
 

@@ -35,6 +35,10 @@ class WebSocketService {
   bool _isStreamingStarted = false;
   String? _currentUtteranceId;
   
+  // Deduplication map for binary audio data
+  final Map<String, Uint8List> _sentAudioData = {};
+  static const int _maxDedupEntries = 100; // Limit memory usage
+  
   // Getters
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<String> get errorStream => _errorController.stream;
@@ -172,15 +176,23 @@ class WebSocketService {
     }
   }
   
-  /// Send PCM frame as binary data
+  /// Send PCM frame as binary data with deduplication
   Future<void> sendPcmFrame(Uint8List pcmFrame) async {
     if (!_isConnected || _channel == null || !_isStreamingStarted) {
+      return;
+    }
+    
+    // Check for duplicate audio data
+    if (_isDuplicateAudioData(pcmFrame)) {
+      print('🚫 WEBSOCKET: Skipping duplicate PCM frame (${pcmFrame.length} bytes)');
       return;
     }
     
     try {
       // Send as binary frame
       _channel!.sink.add(pcmFrame);
+      _addToDedupMap(pcmFrame);
+      print('📤 WEBSOCKET: Sent PCM frame (${pcmFrame.length} bytes)');
     } catch (e) {
       print('❌ WEBSOCKET PCM FRAME ERROR: $e');
     }
@@ -539,9 +551,83 @@ class WebSocketService {
       await _messageController.close();
       await _errorController.close();
       await _connectionController.close();
+      _sentAudioData.clear(); // Clear deduplication map
       print('🗑️ WEBSOCKET: Service disposed');
     } catch (e) {
       print('❌ WEBSOCKET DISPOSE ERROR: $e');
     }
+  }
+  
+  /// Check if audio data is duplicate
+  bool _isDuplicateAudioData(Uint8List audioData) {
+    if (audioData.isEmpty) return true;
+    
+    // Create a hash of the audio data for comparison
+    String audioHash = _createAudioHash(audioData);
+    
+    // Check if we've sent this exact audio data before
+    if (_sentAudioData.containsKey(audioHash)) {
+      Uint8List? previousData = _sentAudioData[audioHash];
+      if (previousData != null && _areAudioDataEqual(audioData, previousData)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  /// Add audio data to deduplication map
+  void _addToDedupMap(Uint8List audioData) {
+    if (audioData.isEmpty) return;
+    
+    String audioHash = _createAudioHash(audioData);
+    _sentAudioData[audioHash] = Uint8List.fromList(audioData);
+    
+    // Limit memory usage by removing oldest entries
+    if (_sentAudioData.length > _maxDedupEntries) {
+      String oldestKey = _sentAudioData.keys.first;
+      _sentAudioData.remove(oldestKey);
+    }
+  }
+  
+  /// Create a hash of audio data for deduplication
+  String _createAudioHash(Uint8List audioData) {
+    // Use a simple hash based on length and first/last few bytes
+    // This is efficient but may have collisions for very similar data
+    int hash = audioData.length;
+    
+    // Add first 4 bytes
+    for (int i = 0; i < 4 && i < audioData.length; i++) {
+      hash = (hash * 31) + audioData[i];
+    }
+    
+    // Add last 4 bytes
+    for (int i = audioData.length - 4; i < audioData.length && i >= 0; i++) {
+      hash = (hash * 31) + audioData[i];
+    }
+    
+    return hash.toString();
+  }
+  
+  /// Compare two audio data arrays for equality
+  bool _areAudioDataEqual(Uint8List data1, Uint8List data2) {
+    if (data1.length != data2.length) return false;
+    
+    // Compare first 100 bytes and last 100 bytes for efficiency
+    int compareLength = data1.length < 200 ? data1.length : 100;
+    
+    // Compare first part
+    for (int i = 0; i < compareLength; i++) {
+      if (data1[i] != data2[i]) return false;
+    }
+    
+    // Compare last part if data is long enough
+    if (data1.length > 200) {
+      for (int i = data1.length - 100; i < data1.length; i++) {
+        if (data1[i] != data2[i]) return false;
+      }
+    }
+    
+    return true;
   }
 }

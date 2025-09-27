@@ -158,8 +158,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       // Start audio recording
       await _audioRecordingService.startRecording();
       
-      // Subscribe to dual-lane audio streams
-      _audioDataSubscription = _audioRecordingService.utteranceStream.listen(_onUtteranceData);
+      // Subscribe to live frame stream only (utterance stream already subscribed in _initializeServices)
       _liveFrameSubscription = _audioRecordingService.liveFrameStream.listen(_onLiveFrameData);
       
       state = state.copyWith(isRecording: true, error: null);
