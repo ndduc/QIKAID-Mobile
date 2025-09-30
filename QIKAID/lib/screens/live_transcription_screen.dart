@@ -29,10 +29,9 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
 
   @override
   void dispose() {
-    // Disconnect from live session when leaving the page
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(liveSessionNotifierProvider.notifier).disconnect();
-    });
+    // Note: We don't call disconnect/dispose here anymore because
+    // the return button now handles proper cleanup with user feedback
+    // This prevents double cleanup and ensures proper sequencing
     
     _scrollController.dispose();
     _textController.dispose();
@@ -132,19 +131,79 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
     _textController.clear();
   }
 
-  /// Handle when transcript session ends
-  /// This method will be used for future implementation of:
-  /// - Saving transcripts to local storage
-  /// - Session management
-  /// - Data persistence
-  void _onTranscriptSessionEnded() {
-    // TODO: Implement transcript session end handling
-    // This could include:
-    // - Saving current session to local storage
-    // - Cleaning up temporary data
-    // - Updating session statistics
-    // - Preparing for next session
-    print('DEBUG: Transcript session ended');
+
+  /// Handle return button tap with proper cleanup
+  Future<void> _handleReturnButton() async {
+    try {
+      print('🔄 LIVE TRANSCRIPTION: Return button tapped - starting cleanup...');
+      
+      final liveSessionNotifier = ref.read(liveSessionNotifierProvider.notifier);
+      final liveSessionState = ref.read(liveSessionNotifierProvider);
+      
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
+        ),
+      );
+      
+      // Step 1: Stop recording if currently recording
+      if (liveSessionState.isRecording) {
+        print('🔄 LIVE TRANSCRIPTION: Stopping recording and sending last utterance...');
+        await liveSessionNotifier.stopSession();
+        
+        // Wait a moment for the last utterance to be processed
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      // Step 2: Disconnect and close WebSocket completely
+      print('🔄 LIVE TRANSCRIPTION: Disconnecting WebSocket...');
+      await liveSessionNotifier.disconnect();
+      
+      // Step 3: Dispose all resources
+      print('🔄 LIVE TRANSCRIPTION: Disposing resources...');
+      await liveSessionNotifier.disposeResources();
+      
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop(); // Close loading dialog
+      }
+      
+      print('✅ LIVE TRANSCRIPTION: Cleanup completed successfully');
+      
+      // Navigate back
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+    } catch (e) {
+      print('❌ LIVE TRANSCRIPTION CLEANUP ERROR: $e');
+      
+      // Close loading dialog if still open
+      if (mounted) {
+        Navigator.of(context).pop(); // Close loading dialog
+      }
+      
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error during cleanup: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      
+      // Still navigate back even if cleanup failed
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   @override
@@ -184,7 +243,7 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () => _handleReturnButton(),
                       icon: const Icon(
                         Icons.arrow_back,
                         color: Colors.white,

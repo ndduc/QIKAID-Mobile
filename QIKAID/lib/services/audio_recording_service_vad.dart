@@ -35,29 +35,47 @@ class AudioRecordingServiceVAD {
   Stream<Uint8List> get utteranceStream => _utteranceController.stream;
   Stream<RecordingState> get stateStream => _stateController.stream;
   bool get isRecording => _isRecording;
+  bool get isStateControllerClosed => _stateController.isClosed;
   
   /// Initialize the VAD handler
   Future<void> initialize() async {
     if (_isInitialized) return;
     
     try {
+      print('🎤 VAD AUDIO RECORDING: Initializing VAD handler...');
+      
+      // Dispose existing handler if any
+      if (_vadHandler != null) {
+        print('🎤 VAD AUDIO RECORDING: Disposing existing VAD handler...');
+        await _vadHandler!.dispose();
+        _vadHandler = null;
+      }
+      
       // Create VAD handler
-      _vadHandler = VadHandler.create(isDebug: true);
+      print('🎤 VAD AUDIO RECORDING: Creating new VAD handler...');
+      _vadHandler = await VadHandler.create(isDebug: false);
       
       // Setup VAD event listeners
+      print('🎤 VAD AUDIO RECORDING: Setting up VAD listeners...');
       _setupVadListeners();
       
       _isInitialized = true;
-      print('🎤 VAD AUDIO RECORDING: Initialized successfully');
+      print('✅ VAD AUDIO RECORDING: Initialized successfully');
     } catch (e) {
       print('❌ VAD AUDIO RECORDING: Initialization failed: $e');
+      _isInitialized = false;
       _stateController.add(RecordingState.error);
     }
   }
   
   /// Setup VAD event listeners
   void _setupVadListeners() {
-    if (_vadHandler == null) return;
+    if (_vadHandler == null) {
+      print('❌ VAD AUDIO RECORDING: Cannot setup listeners - VAD handler is null');
+      return;
+    }
+    
+    print('🎤 VAD AUDIO RECORDING: Setting up VAD event listeners...');
     
     // Speech start detection
     _vadHandler!.onSpeechStart.listen((_) {
@@ -93,11 +111,32 @@ class AudioRecordingServiceVAD {
       print('❌ VAD AUDIO RECORDING: VAD error: $error');
       _stateController.add(RecordingState.error);
     });
+    
+    print('✅ VAD AUDIO RECORDING: VAD event listeners setup completed');
   }
   
   /// Start recording with VAD
   Future<void> startRecording() async {
-    if (_isRecording || !_isInitialized) return;
+    if (_isRecording) {
+      print('⚠️ VAD AUDIO RECORDING: Already recording, skipping start');
+      return;
+    }
+    
+    print('🎤 VAD AUDIO RECORDING: Starting recording...');
+    
+    // Ensure VAD handler is initialized
+    if (!_isInitialized) {
+      print('🔄 VAD AUDIO RECORDING: VAD handler not initialized, initializing...');
+      await initialize();
+    }
+    
+    if (!_isInitialized) {
+      print('❌ VAD AUDIO RECORDING: Failed to initialize VAD handler');
+      _stateController.add(RecordingState.error);
+      return;
+    }
+    
+    print('✅ VAD AUDIO RECORDING: VAD handler is initialized and ready');
     
     try {
       // Request microphone permission
@@ -108,8 +147,12 @@ class AudioRecordingServiceVAD {
         return;
       }
       
+      print('✅ VAD AUDIO RECORDING: Microphone permission granted');
+      
       // Reset sentence detection state
       _resetSentenceState();
+      
+      print('🎤 VAD AUDIO RECORDING: Starting VAD listening...');
       
       // Start VAD listening with optimized parameters
       await _vadHandler!.startListening(
@@ -126,9 +169,11 @@ class AudioRecordingServiceVAD {
       _isRecording = true;
       _stateController.add(RecordingState.recording);
       
+      print('✅ VAD AUDIO RECORDING: VAD listening started successfully');
       print('🎤 VAD AUDIO RECORDING: Started with VAD-based detection');
       print('   - Lane 1: Live frames (${_frameMs}ms, ${_frameBytes} bytes)');
       print('   - Lane 2: VAD utterances with sentence detection');
+      print('🎤 VAD AUDIO RECORDING: Ready to detect speech - speak now!');
       
     } catch (e) {
       print('❌ VAD AUDIO RECORDING: Start failed: $e');
@@ -165,9 +210,15 @@ class AudioRecordingServiceVAD {
   void _handleSpeechStart() {
     if (!_isSpeaking) {
       print('🎤 VAD AUDIO RECORDING: Speech started');
+      print('🎤 VAD AUDIO RECORDING: Previous speaking state: $_isSpeaking');
+      print('🎤 VAD AUDIO RECORDING: Previous speech started: $_hasSpeechStarted');
       _isSpeaking = true;
       _hasSpeechStarted = true;
       _sentenceBuffer.clear();
+      print('🎤 VAD AUDIO RECORDING: Updated speaking state: $_isSpeaking');
+      print('🎤 VAD AUDIO RECORDING: Updated speech started: $_hasSpeechStarted');
+    } else {
+      print('🎤 VAD AUDIO RECORDING: Speech start detected but already speaking');
     }
     
     // Cancel sentence timer since we're speaking
@@ -182,22 +233,37 @@ class AudioRecordingServiceVAD {
   
   /// Handle speech end event
   void _handleSpeechEnd(List<double> samples) {
+    print('🎤 VAD AUDIO RECORDING: Speech end event received');
+    print('🎤 VAD AUDIO RECORDING: Current speaking state: $_isSpeaking');
+    print('🎤 VAD AUDIO RECORDING: Sample count: ${samples.length}');
+    print('🎤 VAD AUDIO RECORDING: Current sentence buffer size: ${_sentenceBuffer.length}');
+    
     if (_isSpeaking) {
       print('🎤 VAD AUDIO RECORDING: Speech ended, starting sentence timer');
       _isSpeaking = false;
       
       // Add samples to sentence buffer
       _sentenceBuffer.addAll(samples);
+      print('🎤 VAD AUDIO RECORDING: Added samples to buffer, new size: ${_sentenceBuffer.length}');
       
       // Start sentence completion timer
+      print('🎤 VAD AUDIO RECORDING: Starting sentence timer (${_silenceTimeoutMs}ms)');
       _sentenceTimer = Timer(
         Duration(milliseconds: _silenceTimeoutMs),
         () {
+          print('🎤 VAD AUDIO RECORDING: Sentence timer triggered');
+          print('🎤 VAD AUDIO RECORDING: Has speech started: $_hasSpeechStarted');
+          print('🎤 VAD AUDIO RECORDING: Sentence buffer size: ${_sentenceBuffer.length}');
           if (_hasSpeechStarted && _sentenceBuffer.isNotEmpty) {
+            print('🎤 VAD AUDIO RECORDING: Flushing sentence...');
             _flushSentence();
+          } else {
+            print('🎤 VAD AUDIO RECORDING: Not flushing - hasSpeechStarted: $_hasSpeechStarted, bufferEmpty: ${_sentenceBuffer.isEmpty}');
           }
         },
       );
+    } else {
+      print('🎤 VAD AUDIO RECORDING: Speech end received but not currently speaking');
     }
   }
   
@@ -212,14 +278,19 @@ class AudioRecordingServiceVAD {
   /// Handle frame processing for live streaming
   void _handleFrameProcessed(dynamic frameData) {
     try {
+
       // Extract audio samples and speech probability from VAD frame data
       if (frameData != null && frameData is Map) {
+        print('🎤 VAD AUDIO RECORDING: Frame data is Map with keys: ${frameData.keys.toList()}');
+        
         // Extract audio samples
         final audioSamples = _extractAudioSamples(frameData);
         
         // Extract speech probability
         final isSpeechProb = frameData['isSpeech'] as double? ?? 0.0;
         final notSpeechProb = frameData['notSpeech'] as double? ?? 0.0;
+        
+        print('🎤 VAD AUDIO RECORDING: Speech prob: ${isSpeechProb.toStringAsFixed(3)}, Samples: ${audioSamples?.length ?? 0}');
         
         if (audioSamples != null && audioSamples.isNotEmpty) {
           // Convert samples to PCM bytes for live streaming
@@ -248,7 +319,6 @@ class AudioRecordingServiceVAD {
             _frameBuffer.add(Uint8List.sublistView(buffer, offset));
           }
           
-          print('🎤 VAD AUDIO RECORDING: Frame processed (${audioSamples.length} samples, speech: ${isSpeechProb.toStringAsFixed(3)})');
         }
       }
     } catch (e) {
@@ -259,12 +329,18 @@ class AudioRecordingServiceVAD {
   /// Extract audio samples from VAD frame data
   List<double>? _extractAudioSamples(dynamic frameData) {
     try {
+      print('🎤 VAD AUDIO RECORDING: Extracting samples from ${frameData.runtimeType}');
+      
       // Handle the actual VAD package frame data structure
       if (frameData is Map) {
+        print('🎤 VAD AUDIO RECORDING: Frame data keys: ${frameData.keys.toList()}');
+        
         // VAD package structure: {List<double> frame, double isSpeech, double notSpeech}
         if (frameData.containsKey('frame')) {
           final frame = frameData['frame'];
+          print('🎤 VAD AUDIO RECORDING: Found frame data: ${frame.runtimeType}');
           if (frame is List) {
+            print('🎤 VAD AUDIO RECORDING: Extracted ${frame.length} samples from frame');
             return frame.cast<double>();
           }
         }
@@ -300,21 +376,43 @@ class AudioRecordingServiceVAD {
   
   /// Flush sentence buffer as complete utterance
   void _flushSentence() {
-    if (_sentenceBuffer.isEmpty || !_hasSpeechStarted) return;
+    print('🎤 VAD AUDIO RECORDING: _flushSentence called');
+    print('🎤 VAD AUDIO RECORDING: Sentence buffer size: ${_sentenceBuffer.length}');
+    print('🎤 VAD AUDIO RECORDING: Has speech started: $_hasSpeechStarted');
+    
+    if (_sentenceBuffer.isEmpty || !_hasSpeechStarted) {
+      print('🎤 VAD AUDIO RECORDING: Not flushing - buffer empty or speech not started');
+      return;
+    }
     
     try {
+      print('🎤 VAD AUDIO RECORDING: Converting samples to PCM...');
       // Convert samples to PCM bytes
       final pcmBytes = _convertSamplesToPcm(_sentenceBuffer);
+      print('🎤 VAD AUDIO RECORDING: PCM bytes length: ${pcmBytes.length}');
       
+      print('🎤 VAD AUDIO RECORDING: Wrapping PCM as WAV...');
       // Wrap with WAV header for complete utterance
       final wavBytes = _wrapPcmAsWav(pcmBytes, _sampleRate, numChannels: 1);
-      _utteranceController.add(wavBytes);
+      print('🎤 VAD AUDIO RECORDING: WAV bytes length: ${wavBytes.length}');
+      
+      print('🎤 VAD AUDIO RECORDING: Adding utterance to stream...');
+      print('🎤 VAD AUDIO RECORDING: Utterance controller isClosed: ${_utteranceController.isClosed}');
+      print('🎤 VAD AUDIO RECORDING: Utterance controller hasListener: ${_utteranceController.hasListener}');
+      
+      if (!_utteranceController.isClosed) {
+        _utteranceController.add(wavBytes);
+        print('✅ VAD AUDIO RECORDING: Utterance added to stream successfully');
+      } else {
+        print('❌ VAD AUDIO RECORDING: Utterance controller is closed, cannot add utterance');
+      }
       
       print('📤 VAD AUDIO RECORDING: Sent complete sentence (${wavBytes.length} bytes)');
       
       // Reset sentence buffer
       _sentenceBuffer.clear();
       _hasSpeechStarted = false;
+      print('🎤 VAD AUDIO RECORDING: Sentence buffer reset');
       
     } catch (e) {
       print('❌ VAD AUDIO RECORDING: Sentence flush error: $e');
@@ -396,17 +494,33 @@ class AudioRecordingServiceVAD {
   }
   
   
-  /// Dispose of resources
-  Future<void> dispose() async {
+  /// Reset the service state for reuse (alternative to dispose)
+  Future<void> reset() async {
     try {
-      await stopRecording();
+      print('🔄 VAD AUDIO RECORDING: Resetting service state...');
+      
+      // Stop recording if active
+      if (_isRecording) {
+        await stopRecording();
+      }
+      
+      // Dispose VAD handler (this needs to be recreated)
       await _vadHandler?.dispose();
-      await _liveFrameController.close();
-      await _utteranceController.close();
-      await _stateController.close();
-      print('🗑️ VAD AUDIO RECORDING: Service disposed');
+      _vadHandler = null;
+      
+      // Reset state variables
+      _isRecording = false;
+      _isInitialized = false;
+      _isSpeaking = false;
+      _hasSpeechStarted = false;
+      _sentenceBuffer.clear();
+      _frameBuffer.clear();
+      _sentenceTimer?.cancel();
+      _sentenceTimer = null;
+      
+      print('✅ VAD AUDIO RECORDING: Service reset completed');
     } catch (e) {
-      print('❌ VAD AUDIO RECORDING: Dispose error: $e');
+      print('❌ VAD AUDIO RECORDING RESET ERROR: $e');
     }
   }
 }

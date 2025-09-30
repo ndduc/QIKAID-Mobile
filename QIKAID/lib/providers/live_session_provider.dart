@@ -88,8 +88,13 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       
       // Set up audio recording listeners
       // Dual-lane audio streaming: utterances + live frames
+      print('🎯 LIVE SESSION: Setting up utterance stream subscription...');
       _audioDataSubscription = _audioRecordingService.utteranceStream.listen(_onUtteranceData);
+      print('✅ LIVE SESSION: Utterance stream subscription created');
+      
+      print('🎯 LIVE SESSION: Setting up audio state stream subscription...');
       _audioStateSubscription = _audioRecordingService.stateStream.listen(_onAudioState);
+      print('✅ LIVE SESSION: Audio state stream subscription created');
       
       state = state.copyWith(isInitialized: true);
       
@@ -109,6 +114,35 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   }) async {
     try {
       print('🎯 LIVE SESSION: Connecting to live session...');
+      print('🎯 LIVE SESSION: WebSocket service state - isConnected: ${_webSocketService.isConnected}, controllerClosed: ${_webSocketService.isConnectionControllerClosed}');
+      
+      // Ensure WebSocket service is in a usable state
+      if (_webSocketService.isConnectionControllerClosed) {
+        print('🔄 LIVE SESSION: WebSocket service was disposed, resetting...');
+        await _webSocketService.reset();
+        print('🔄 LIVE SESSION: WebSocket service reset completed');
+      }
+      
+      // Additional check: if service is not connected, ensure it's properly reset
+      if (!_webSocketService.isConnected && _webSocketService.hasChannel) {
+        print('🔄 LIVE SESSION: WebSocket service has channel but not connected, forcing reset...');
+        await _webSocketService.reset();
+        print('🔄 LIVE SESSION: WebSocket service force reset completed');
+      }
+      
+      // Re-establish WebSocket subscriptions if they were closed
+      if (_wsConnectionSubscription == null || _wsConnectionSubscription!.isPaused) {
+        print('🔄 LIVE SESSION: Re-establishing WebSocket subscriptions...');
+        _wsMessageSubscription?.cancel();
+        _wsErrorSubscription?.cancel();
+        _wsConnectionSubscription?.cancel();
+        
+        _wsMessageSubscription = _webSocketService.messageStream.listen(_onWebSocketMessage);
+        _wsErrorSubscription = _webSocketService.errorStream.listen(_onWebSocketError);
+        _wsConnectionSubscription = _webSocketService.connectionStream.listen(_onWebSocketConnection);
+        
+        print('✅ LIVE SESSION: WebSocket subscriptions re-established');
+      }
       
       state = state.copyWith(
         cognitoId: cognitoId,
@@ -117,6 +151,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       );
       
       // Connect to WebSocket
+      print('🎯 LIVE SESSION: Attempting WebSocket connection...');
       final connected = await _webSocketService.connect(
         cognitoId: cognitoId,
         accessToken: accessToken,
@@ -124,11 +159,20 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
         meetingTitle: meetingTitle,
       );
       
+      print('🎯 LIVE SESSION: WebSocket connection result: $connected');
+      print('🎯 LIVE SESSION: WebSocket service isConnected: ${_webSocketService.isConnected}');
+      print('🎯 LIVE SESSION: WebSocket service channel: ${_webSocketService.hasChannel}');
+      print('🎯 LIVE SESSION: Current state isConnected: ${state.isConnected}');
+      
       if (connected) {
         print('✅ LIVE SESSION: Connected successfully');
+        // Force state update to ensure UI reflects connection
+        state = state.copyWith(isConnected: true);
+        print('✅ LIVE SESSION: State updated - isConnected: ${state.isConnected}');
         return true;
       } else {
         print('❌ LIVE SESSION: Failed to connect');
+        print('❌ LIVE SESSION: Final WebSocket state - isConnected: ${_webSocketService.isConnected}');
         state = state.copyWith(error: 'Failed to connect to live session');
         return false;
       }
@@ -155,10 +199,43 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
         print('🎤 LIVE SESSION: This is for testing microphone functionality only');
       }
       
+      // Ensure audio recording service is in a usable state
+      if (_audioRecordingService.isStateControllerClosed) {
+        print('🔄 LIVE SESSION: Audio recording service was disposed, resetting...');
+        await _audioRecordingService.reset();
+        print('🔄 LIVE SESSION: Audio recording service reset completed');
+      }
+      
+      // Check utterance stream subscription after potential reset
+      print('🎯 LIVE SESSION: Checking utterance stream subscription...');
+      print('🎯 LIVE SESSION: Audio data subscription: ${_audioDataSubscription != null ? 'EXISTS' : 'NULL'}');
+      print('🎯 LIVE SESSION: Audio data subscription paused: ${_audioDataSubscription?.isPaused ?? 'N/A'}');
+      
+      // Force re-establishment of utterance stream subscription
+      print('🔄 LIVE SESSION: Force re-establishing utterance stream subscription...');
+      _audioDataSubscription?.cancel();
+      _audioDataSubscription = _audioRecordingService.utteranceStream.listen(_onUtteranceData);
+      print('✅ LIVE SESSION: Utterance stream subscription force re-established');
+      
+      // Test utterance stream by adding a test listener
+      print('🧪 LIVE SESSION: Testing utterance stream with additional listener...');
+      final testSubscription = _audioRecordingService.utteranceStream.listen((data) {
+        print('🧪 LIVE SESSION: Test listener received utterance data: ${data.length} bytes');
+      });
+      
+      // Cancel test subscription after a short delay
+      Timer(const Duration(seconds: 5), () {
+        testSubscription.cancel();
+        print('🧪 LIVE SESSION: Test subscription cancelled');
+      });
+      
+      // Test utterance stream before starting recording
+      testUtteranceStream();
+      
       // Start audio recording
       await _audioRecordingService.startRecording();
       
-      // Subscribe to live frame stream only (utterance stream already subscribed in _initializeServices)
+      // Subscribe to live frame stream
       _liveFrameSubscription = _audioRecordingService.liveFrameStream.listen(_onLiveFrameData);
       
       state = state.copyWith(isRecording: true, error: null);
@@ -179,8 +256,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     try {
       print('🎯 LIVE SESSION: Stopping live session...');
       
-      // Cancel subscriptions
-      _audioDataSubscription?.cancel();
+      // Cancel only the live frame subscription (keep utterance stream active)
       _liveFrameSubscription?.cancel();
       
       // Stop audio streaming session if connected
@@ -198,6 +274,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       );
       
       print('✅ LIVE SESSION: Live session stopped successfully');
+      print('🎤 LIVE SESSION: Utterance stream subscription maintained for restart');
     } catch (e) {
       print('❌ LIVE SESSION STOP ERROR: $e');
       state = state.copyWith(error: 'Failed to stop live session: $e');
@@ -278,17 +355,24 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   
   /// Handle WebSocket connection changes
   void _onWebSocketConnection(bool isConnected) {
-    print('🎯 LIVE SESSION: WebSocket connection: $isConnected');
+    print('🎯 LIVE SESSION: WebSocket connection callback triggered: $isConnected');
+    print('🎯 LIVE SESSION: Previous state isConnected: ${state.isConnected}');
     state = state.copyWith(isConnected: isConnected);
+    print('🎯 LIVE SESSION: New state isConnected: ${state.isConnected}');
   }
   
   /// Handle utterance data (complete sentences)
   void _onUtteranceData(Uint8List audioData) {
     try {
+      print('🎯 LIVE SESSION: _onUtteranceData called with ${audioData.length} bytes');
       print('🎯 LIVE SESSION: Processing utterance data (${audioData.length} bytes)');
+      print('🎯 LIVE SESSION: WebSocket connected: ${state.isConnected}');
+      print('🎯 LIVE SESSION: WebSocket service connected: ${_webSocketService.isConnected}');
       
       // Only send to WebSocket if connected
       if (state.isConnected) {
+        print('📤 LIVE SESSION: Sending utterance to WebSocket...');
+        
         // Send utterance start marker
         final utteranceId = 'utt-${DateTime.now().millisecondsSinceEpoch}';
         _webSocketService.sendUtteranceStart(
@@ -306,6 +390,7 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       } else {
         print('🎤 LIVE SESSION: Utterance captured (offline mode - not sending to WebSocket)');
         print('🎤 LIVE SESSION: Audio amplitude: ${_calculateAudioAmplitude(audioData).toStringAsFixed(4)}');
+        print('🎤 LIVE SESSION: WebSocket connection status: ${_webSocketService.isConnected}');
       }
       
     } catch (e) {
@@ -365,17 +450,54 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     state = state.copyWith(error: null);
   }
   
+  /// Dispose of all resources properly
+  Future<void> disposeResources() async {
+    try {
+      print('🗑️ LIVE SESSION: Starting disposal...');
+      
+      // Cancel all subscriptions
+      _wsMessageSubscription?.cancel();
+      _wsErrorSubscription?.cancel();
+      _wsConnectionSubscription?.cancel();
+      _audioDataSubscription?.cancel();
+      _liveFrameSubscription?.cancel();
+      _audioStateSubscription?.cancel();
+      
+      // Reset services instead of disposing (allows reuse)
+      await _webSocketService.reset();
+      await _audioRecordingService.reset();
+      
+      print('✅ LIVE SESSION: Disposal completed');
+    } catch (e) {
+      print('❌ LIVE SESSION DISPOSAL ERROR: $e');
+    }
+  }
+  
+  /// Test utterance stream manually
+  void testUtteranceStream() {
+    print('🧪 LIVE SESSION: Testing utterance stream manually...');
+    
+    // Test the subscription
+    final testSub = _audioRecordingService.utteranceStream.listen((data) {
+      print('🧪 LIVE SESSION: Manual test received data: ${data.length} bytes');
+    });
+    
+    // Cancel after 2 seconds
+    Timer(const Duration(seconds: 2), () {
+      testSub.cancel();
+      print('🧪 LIVE SESSION: Manual test subscription cancelled');
+    });
+  }
+
   @override
   void dispose() {
+    // Cancel subscriptions immediately (sync)
     _wsMessageSubscription?.cancel();
     _wsErrorSubscription?.cancel();
     _wsConnectionSubscription?.cancel();
     _audioDataSubscription?.cancel();
     _liveFrameSubscription?.cancel();
     _audioStateSubscription?.cancel();
-    
-    _webSocketService.dispose();
-    _audioRecordingService.dispose();
     
     super.dispose();
   }
@@ -384,18 +506,16 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
 /// Live session service provider
 final liveSessionServiceProvider = Provider<WebSocketService>((ref) {
   final service = WebSocketService();
-  ref.onDispose(() {
-    service.dispose();
-  });
+  // Note: We don't auto-dispose here because we handle disposal manually
+  // in the return button cleanup to ensure proper sequencing
   return service;
 });
 
 /// Audio recording service provider
 final audioRecordingServiceProvider = Provider<AudioRecordingServiceVAD>((ref) {
   final service = AudioRecordingServiceVAD();
-  ref.onDispose(() {
-    service.dispose();
-  });
+  // Note: We don't auto-dispose here because we handle disposal manually
+  // in the return button cleanup to ensure proper sequencing
   return service;
 });
 

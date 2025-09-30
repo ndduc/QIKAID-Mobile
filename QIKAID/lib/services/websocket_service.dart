@@ -45,6 +45,8 @@ class WebSocketService {
   Stream<bool> get connectionStream => _connectionController.stream;
   bool get isConnected => _isConnected;
   String? get sessionId => _sessionId;
+  bool get isConnectionControllerClosed => _connectionController.isClosed;
+  bool get hasChannel => _channel != null;
   
   /// Connect to the comprehend WebSocket service with retry logic
   Future<bool> connect({
@@ -63,6 +65,7 @@ class WebSocketService {
     this.cognitoId = cognitoId;
     
     print('🔌 WEBSOCKET: Starting connection to comprehend service...');
+    print('🔌 WEBSOCKET: Current state - isConnected: $_isConnected, channel: ${_channel != null}');
     
     // Try connection with retry logic
     for (int attempt = 1; attempt <= 3; attempt++) {
@@ -100,7 +103,13 @@ class WebSocketService {
         // Check if connection is still active
         if (_channel != null && _channel!.closeCode == null) {
           _isConnected = true;
-          _connectionController.add(true);
+          print('🔌 WEBSOCKET: Adding connection event to controller...');
+          if (!_connectionController.isClosed) {
+            _connectionController.add(true);
+            print('✅ WEBSOCKET: Connection event added successfully');
+          } else {
+            print('❌ WEBSOCKET: Connection controller is closed, cannot add event');
+          }
           print('✅ WEBSOCKET: Connected successfully on attempt $attempt');
           print('✅ WEBSOCKET CONNECTION ESTABLISHED:');
           print('   - WebSocket URL: $wsUrl');
@@ -448,8 +457,12 @@ class WebSocketService {
       // Mark as connected when we receive the first message
       if (!_isConnected) {
         _isConnected = true;
-        _connectionController.add(true);
-        print('✅ WEBSOCKET: Connection established (first message received)');
+        if (!_connectionController.isClosed) {
+          _connectionController.add(true);
+          print('✅ WEBSOCKET: Connection established (first message received)');
+        } else {
+          print('⚠️ WEBSOCKET: Connection controller already closed, skipping connection event');
+        }
       }
       
       // Handle message chunking
@@ -486,18 +499,31 @@ class WebSocketService {
           break;
         case 'ERROR':
           print('❌ WEBSOCKET: Server error: ${data['error']}');
-          _errorController.add('Server error: ${data['error']}');
+          if (!_errorController.isClosed) {
+            _errorController.add('Server error: ${data['error']}');
+          } else {
+            print('⚠️ WEBSOCKET: Error controller already closed, skipping error message');
+          }
           break;
         default:
           print('📨 WEBSOCKET: Unknown message type: ${data['type']}');
       }
       
-      _messageController.add(data);
+      if (!_messageController.isClosed) {
+        _messageController.add(data);
+      } else {
+        print('⚠️ WEBSOCKET: Message controller already closed, skipping message');
+      }
       
     } catch (e) {
       print('❌ WEBSOCKET MESSAGE PARSE ERROR: $e');
       print('❌ WEBSOCKET: Raw message: ${message.toString()}');
-      _errorController.add('Failed to parse message: $e');
+      
+      if (!_errorController.isClosed) {
+        _errorController.add('Failed to parse message: $e');
+      } else {
+        print('⚠️ WEBSOCKET: Error controller already closed, skipping parse error');
+      }
       
       // Reset buffer on error
       _messageBuffer = '';
@@ -522,12 +548,22 @@ class WebSocketService {
   void _onError(error) {
     print('❌ WEBSOCKET ERROR: $error');
     _isConnected = false;
-    _connectionController.add(false);
+    
+    // Only add to controller if it's not closed
+    if (!_connectionController.isClosed) {
+      _connectionController.add(false);
+    } else {
+      print('⚠️ WEBSOCKET: Connection controller already closed, skipping error event');
+    }
     
     // Only show error to user if we're not in retry mode
     // This prevents showing temporary connection errors during retry attempts
     if (_channel == null || _channel!.closeCode != null) {
-      _errorController.add('WebSocket error: $error');
+      if (!_errorController.isClosed) {
+        _errorController.add('WebSocket error: $error');
+      } else {
+        print('⚠️ WEBSOCKET: Error controller already closed, skipping error message');
+      }
     }
   }
   
@@ -535,7 +571,13 @@ class WebSocketService {
   void _onDisconnected() {
     print('🔌 WEBSOCKET: Disconnected');
     _isConnected = false;
-    _connectionController.add(false);
+    
+    // Only add to controller if it's not closed
+    if (!_connectionController.isClosed) {
+      _connectionController.add(false);
+    } else {
+      print('⚠️ WEBSOCKET: Connection controller already closed, skipping disconnect event');
+    }
   }
   
   /// Start keep-alive mechanism
@@ -599,18 +641,39 @@ class WebSocketService {
     }
   }
   
-  /// Dispose of resources
-  Future<void> dispose() async {
+  /// Reset the service state for reuse (alternative to dispose)
+  Future<void> reset() async {
     try {
+      print('🔄 WEBSOCKET: Resetting service state...');
+      
+      // Stop keep-alive first
       _stopKeepAlive();
-      await disconnect();
-      await _messageController.close();
-      await _errorController.close();
-      await _connectionController.close();
-      _sentAudioData.clear(); // Clear deduplication map
-      print('🗑️ WEBSOCKET: Service disposed');
+      
+      // Disconnect if connected
+      if (_isConnected || _channel != null) {
+        print('🔄 WEBSOCKET: Disconnecting before reset...');
+        await disconnect();
+      }
+      
+      // Reset state variables
+      _isConnected = false;
+      _isStreamingStarted = false;
+      _currentUtteranceId = null;
+      _messageBuffer = '';
+      _isReceivingPartialMessage = false;
+      
+      // Clear deduplication map
+      _sentAudioData.clear();
+      
+      // Ensure channel is completely null
+      _channel = null;
+      
+      // Small delay to ensure cleanup is complete
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      print('✅ WEBSOCKET: Service reset completed - ready for new connection');
     } catch (e) {
-      print('❌ WEBSOCKET DISPOSE ERROR: $e');
+      print('❌ WEBSOCKET RESET ERROR: $e');
     }
   }
   
