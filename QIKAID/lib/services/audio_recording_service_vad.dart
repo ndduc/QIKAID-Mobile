@@ -36,36 +36,34 @@ class AudioRecordingServiceVAD {
   Stream<RecordingState> get stateStream => _stateController.stream;
   bool get isRecording => _isRecording;
   bool get isStateControllerClosed => _stateController.isClosed;
+  bool get isInitialized => _isInitialized;
   
   /// Initialize the VAD handler
   Future<void> initialize() async {
-    if (_isInitialized) return;
+    print('🎤 VAD AUDIO RECORDING: Initializing VAD handler...');
     
-    try {
-      print('🎤 VAD AUDIO RECORDING: Initializing VAD handler...');
-      
-      // Dispose existing handler if any
-      if (_vadHandler != null) {
-        print('🎤 VAD AUDIO RECORDING: Disposing existing VAD handler...');
+    // Dispose existing handler if any (force reinitialization for singleton)
+    if (_vadHandler != null) {
+      print('🎤 VAD AUDIO RECORDING: Disposing existing VAD handler...');
+      try {
         await _vadHandler!.dispose();
-        _vadHandler = null;
+        print('✅ VAD AUDIO RECORDING: Existing VAD handler disposed successfully');
+      } catch (e) {
+        print('⚠️ VAD AUDIO RECORDING: Error disposing existing handler (ignoring): $e');
       }
-      
-      // Create VAD handler
-      print('🎤 VAD AUDIO RECORDING: Creating new VAD handler...');
-      _vadHandler = await VadHandler.create(isDebug: false);
-      
-      // Setup VAD event listeners
-      print('🎤 VAD AUDIO RECORDING: Setting up VAD listeners...');
-      _setupVadListeners();
-      
-      _isInitialized = true;
-      print('✅ VAD AUDIO RECORDING: Initialized successfully');
-    } catch (e) {
-      print('❌ VAD AUDIO RECORDING: Initialization failed: $e');
-      _isInitialized = false;
-      _stateController.add(RecordingState.error);
+      _vadHandler = null;
     }
+    
+    // Create VAD handler
+    print('🎤 VAD AUDIO RECORDING: Creating new VAD handler...');
+    _vadHandler = await VadHandler.create(isDebug: false);
+    
+    // Setup VAD event listeners
+    print('🎤 VAD AUDIO RECORDING: Setting up VAD listeners...');
+    _setupVadListeners();
+    
+    _isInitialized = true;
+    print('✅ VAD AUDIO RECORDING: Initialized successfully');
   }
   
   /// Setup VAD event listeners
@@ -124,19 +122,23 @@ class AudioRecordingServiceVAD {
     
     print('🎤 VAD AUDIO RECORDING: Starting recording...');
     
-    // Ensure VAD handler is initialized
-    if (!_isInitialized) {
-      print('🔄 VAD AUDIO RECORDING: VAD handler not initialized, initializing...');
+    // Always reinitialize VAD handler for singleton service
+    print('🔄 VAD AUDIO RECORDING: Reinitializing VAD handler for new session...');
+    try {
       await initialize();
-    }
-    
-    if (!_isInitialized) {
-      print('❌ VAD AUDIO RECORDING: Failed to initialize VAD handler');
+      
+      if (!_isInitialized) {
+        print('❌ VAD AUDIO RECORDING: Failed to initialize VAD handler');
+        _stateController.add(RecordingState.error);
+        return;
+      }
+      
+      print('✅ VAD AUDIO RECORDING: VAD handler is initialized and ready');
+    } catch (e) {
+      print('❌ VAD AUDIO RECORDING: VAD initialization error: $e');
       _stateController.add(RecordingState.error);
       return;
     }
-    
-    print('✅ VAD AUDIO RECORDING: VAD handler is initialized and ready');
     
     try {
       // Request microphone permission

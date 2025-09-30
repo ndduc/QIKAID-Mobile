@@ -503,21 +503,27 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   }
 }
 
-/// Live session service provider
+/// Live session service provider (singleton)
 final liveSessionServiceProvider = Provider<WebSocketService>((ref) {
-  final service = WebSocketService();
-  // Note: We don't auto-dispose here because we handle disposal manually
-  // in the return button cleanup to ensure proper sequencing
-  return service;
+  // Create singleton instance
+  if (!_webSocketServiceInstance.isInitialized) {
+    _webSocketServiceInstance = WebSocketService();
+  }
+  return _webSocketServiceInstance;
 });
 
-/// Audio recording service provider
+/// Audio recording service provider (singleton)
 final audioRecordingServiceProvider = Provider<AudioRecordingServiceVAD>((ref) {
-  final service = AudioRecordingServiceVAD();
-  // Note: We don't auto-dispose here because we handle disposal manually
-  // in the return button cleanup to ensure proper sequencing
-  return service;
+  // Create singleton instance
+  if (!_audioRecordingServiceInstance.isInitialized) {
+    _audioRecordingServiceInstance = AudioRecordingServiceVAD();
+  }
+  return _audioRecordingServiceInstance;
 });
+
+// Singleton instances
+WebSocketService _webSocketServiceInstance = WebSocketService();
+AudioRecordingServiceVAD _audioRecordingServiceInstance = AudioRecordingServiceVAD();
 
 /// Live session notifier provider
 final liveSessionNotifierProvider = StateNotifierProvider<LiveSessionNotifier, LiveSessionState>((ref) {

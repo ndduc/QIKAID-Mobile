@@ -47,6 +47,7 @@ class WebSocketService {
   String? get sessionId => _sessionId;
   bool get isConnectionControllerClosed => _connectionController.isClosed;
   bool get hasChannel => _channel != null;
+  bool get isInitialized => true; // WebSocket service is always initialized
   
   /// Connect to the comprehend WebSocket service with retry logic
   Future<bool> connect({
