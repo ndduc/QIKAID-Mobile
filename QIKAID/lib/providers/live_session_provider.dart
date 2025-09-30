@@ -9,6 +9,7 @@ class LiveSessionState {
   final bool isConnected;
   final bool isRecording;
   final bool isInitialized;
+  final bool isWaitingForResponse;
   final String? currentText;
   final String? error;
   final String? sessionId;
@@ -18,6 +19,7 @@ class LiveSessionState {
     this.isConnected = false,
     this.isRecording = false,
     this.isInitialized = false,
+    this.isWaitingForResponse = false,
     this.currentText,
     this.error,
     this.sessionId,
@@ -28,6 +30,7 @@ class LiveSessionState {
     bool? isConnected,
     bool? isRecording,
     bool? isInitialized,
+    bool? isWaitingForResponse,
     String? currentText,
     String? error,
     String? sessionId,
@@ -37,6 +40,7 @@ class LiveSessionState {
       isConnected: isConnected ?? this.isConnected,
       isRecording: isRecording ?? this.isRecording,
       isInitialized: isInitialized ?? this.isInitialized,
+      isWaitingForResponse: isWaitingForResponse ?? this.isWaitingForResponse,
       currentText: currentText ?? this.currentText,
       error: error ?? this.error,
       sessionId: sessionId ?? this.sessionId,
@@ -333,27 +337,35 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
         case 'TRANSCRIPTION_RESULT':
           final text = message['text'] as String?;
           if (text != null && text.isNotEmpty) {
-            state = state.copyWith(currentText: text, error: null);
+            state = state.copyWith(currentText: text, error: null, isWaitingForResponse: false);
             print('🎯 LIVE SESSION: Updated text: "$text"');
+            print('✅ LIVE SESSION: Set isWaitingForResponse = false (response received)');
           }
           break;
         case 'CLASSIFICATION_RESULT':
           print('🎯 LIVE SESSION: Classification result received');
+          // Reset waiting state for classification results too
+          state = state.copyWith(isWaitingForResponse: false);
+          print('✅ LIVE SESSION: Set isWaitingForResponse = false (classification response received)');
           break;
         case 'ERROR':
           final error = message['error'] as String?;
-          state = state.copyWith(error: error);
+          state = state.copyWith(error: error, isWaitingForResponse: false);
+          print('❌ LIVE SESSION: Error received, set isWaitingForResponse = false');
           break;
       }
     } catch (e) {
       print('❌ LIVE SESSION MESSAGE HANDLER ERROR: $e');
+      // Reset waiting state on error
+      state = state.copyWith(isWaitingForResponse: false);
     }
   }
   
   /// Handle WebSocket errors
   void _onWebSocketError(String error) {
     print('❌ LIVE SESSION: WebSocket error: $error');
-    state = state.copyWith(error: error);
+    state = state.copyWith(error: error, isWaitingForResponse: false);
+    print('❌ LIVE SESSION: Set isWaitingForResponse = false (WebSocket error)');
   }
   
   /// Handle WebSocket connection changes
@@ -375,6 +387,10 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       // Only send to WebSocket if connected
       if (state.isConnected) {
         print('📤 LIVE SESSION: Sending utterance to WebSocket...');
+        
+        // Set waiting for response state
+        state = state.copyWith(isWaitingForResponse: true);
+        print('⏳ LIVE SESSION: Set isWaitingForResponse = true');
         
         // Send utterance start marker
         final utteranceId = 'utt-${DateTime.now().millisecondsSinceEpoch}';
@@ -398,6 +414,8 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       
     } catch (e) {
       print('❌ LIVE SESSION UTTERANCE HANDLER ERROR: $e');
+      // Reset waiting state on error
+      state = state.copyWith(isWaitingForResponse: false);
     }
   }
   

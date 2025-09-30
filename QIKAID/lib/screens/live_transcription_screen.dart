@@ -3,7 +3,161 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/live_session_provider.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/gradient_background.dart';
-import '../widgets/language_selector.dart';
+
+/// Chat-like animation widget for audio processing
+class AudioProcessingAnimation extends StatefulWidget {
+  final bool isActive;
+  final String message;
+  final Color? color;
+  
+  const AudioProcessingAnimation({
+    super.key,
+    required this.isActive,
+    required this.message,
+    this.color,
+  });
+
+  @override
+  State<AudioProcessingAnimation> createState() => _AudioProcessingAnimationState();
+}
+
+class _AudioProcessingAnimationState extends State<AudioProcessingAnimation>
+    with TickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+    
+    _scaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.2,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    _opacityAnimation = Tween<double>(
+      begin: 0.3,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void didUpdateWidget(AudioProcessingAnimation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _animationController.repeat(reverse: true);
+    } else if (!widget.isActive && oldWidget.isActive) {
+      _animationController.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.isActive) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: _animationController,
+      builder: (context, child) {
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: (widget.color ?? Colors.blue).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: (widget.color ?? Colors.blue).withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // Animated typing dots (like chat apps)
+              SizedBox(
+                width: 32,
+                height: 24,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(3, (index) {
+                    return Container(
+                      margin: EdgeInsets.only(right: index < 2 ? 4 : 0),
+                      child: AnimatedBuilder(
+                        animation: _animationController,
+                        builder: (context, child) {
+                          final delay = index * 0.2;
+                          final animationValue = (_animationController.value - delay).clamp(0.0, 1.0);
+                          final scale = Tween<double>(begin: 0.5, end: 1.0).transform(animationValue);
+                          final opacity = Tween<double>(begin: 0.3, end: 1.0).transform(animationValue);
+                          
+                          return Transform.scale(
+                            scale: scale,
+                            child: Opacity(
+                              opacity: opacity,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: widget.color ?? Colors.blue,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Message text
+              Expanded(
+                child: Text(
+                  widget.message,
+                  style: TextStyle(
+                    color: widget.color ?? Colors.blue,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              // Processing icon
+              Transform.scale(
+                scale: _scaleAnimation.value,
+                child: Opacity(
+                  opacity: _opacityAnimation.value,
+                  child: Icon(
+                    Icons.mic,
+                    color: widget.color ?? Colors.blue,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
 
 class LiveTranscriptionScreen extends ConsumerStatefulWidget {
   const LiveTranscriptionScreen({super.key});
@@ -268,8 +422,6 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const LanguageSelector(showAsDialog: true),
-                    const SizedBox(width: 4),
                     IconButton(
                       onPressed: _showSettings,
                       icon: const Icon(
@@ -288,56 +440,56 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
               ),
 
               // Connection status banner
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: liveSessionState.isConnected 
-                      ? Colors.green.withValues(alpha: 0.2)
-                      : Colors.red.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: liveSessionState.isConnected 
-                        ? Colors.green.withValues(alpha: 0.4)
-                        : Colors.red.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      liveSessionState.isConnected ? Icons.wifi : Icons.wifi_off,
-                      color: liveSessionState.isConnected ? Colors.green : Colors.red,
-                      size: 16,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        liveSessionState.isConnected 
-                            ? 'Connected to Live Session (WebSocket)'
-                            : 'Offline Mode - Testing Microphone Only',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: liveSessionState.isConnected ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    if (!liveSessionState.isConnected)
-                      TextButton(
-                        onPressed: _manualConnect,
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text(
-                          'Connect',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              // Container(
+              //   margin: const EdgeInsets.symmetric(horizontal: 16),
+              //   padding: const EdgeInsets.all(12),
+              //   decoration: BoxDecoration(
+              //     color: liveSessionState.isConnected
+              //         ? Colors.green.withValues(alpha: 0.2)
+              //         : Colors.red.withValues(alpha: 0.2),
+              //     borderRadius: BorderRadius.circular(8),
+              //     border: Border.all(
+              //       color: liveSessionState.isConnected
+              //           ? Colors.green.withValues(alpha: 0.4)
+              //           : Colors.red.withValues(alpha: 0.4),
+              //     ),
+              //   ),
+              //   child: Row(
+              //     children: [
+              //       Icon(
+              //         liveSessionState.isConnected ? Icons.wifi : Icons.wifi_off,
+              //         color: liveSessionState.isConnected ? Colors.green : Colors.red,
+              //         size: 16,
+              //       ),
+              //       const SizedBox(width: 8),
+              //       Expanded(
+              //         child: Text(
+              //           liveSessionState.isConnected
+              //               ? 'Connected to Live Session (WebSocket)'
+              //               : 'Offline Mode - Testing Microphone Only',
+              //           style: TextStyle(
+              //             fontSize: 12,
+              //             color: liveSessionState.isConnected ? Colors.green : Colors.red,
+              //             fontWeight: FontWeight.w500,
+              //           ),
+              //         ),
+              //       ),
+              //       if (!liveSessionState.isConnected)
+              //         TextButton(
+              //           onPressed: _manualConnect,
+              //           style: TextButton.styleFrom(
+              //             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              //             minimumSize: Size.zero,
+              //             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              //           ),
+              //           child: const Text(
+              //             'Connect',
+              //             style: TextStyle(fontSize: 12),
+              //           ),
+              //         ),
+              //     ],
+              //   ),
+              // ),
 
               const SizedBox(height: 16),
 
@@ -373,63 +525,57 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                           ),
                           child: Row(
                             children: [
-                              TextButton.icon(
-                                onPressed: _copyTranscript,
-                                icon: const Icon(
-                                  Icons.copy,
-                                  size: 16,
-                                  color: Color(0xFF3182CE),
-                                ),
-                                label: const Text(
-                                  'Copy',
-                                  style: TextStyle(
-                                    color: Color(0xFF3182CE),
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
                               const Spacer(),
-                              TextButton.icon(
-                                onPressed: _selectConversation,
-                                icon: const Icon(
-                                  Icons.chat_bubble_outline,
-                                  size: 16,
-                                  color: Color(0xFF3182CE),
-                                ),
-                                label: const Text(
-                                  'Select conversation',
-                                  style: TextStyle(
-                                    color: Color(0xFF3182CE),
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),
 
                         // Messages list
                         Expanded(
-                          child: _messages.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No transcripts yet. Start speaking to see your conversation here.',
-                                    style: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 14,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                )
-                              : ListView.builder(
-                                  controller: _scrollController,
-                                  padding: const EdgeInsets.all(16),
-                                  itemCount: _messages.length,
-                                  itemBuilder: (context, index) {
-                                    final message = _messages[index];
-                                    return _buildMessageBubble(message);
-                                  },
-                                ),
+                          child: Column(
+                            children: [
+                              // Messages
+                              Expanded(
+                                child: _messages.isEmpty
+                                    ? const Center(
+                                        child: Text(
+                                          'No transcripts yet. Start speaking to see your conversation here.',
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 14,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      )
+                                    : ListView.builder(
+                                        controller: _scrollController,
+                                        padding: const EdgeInsets.all(16),
+                                        itemCount: _messages.length,
+                                        itemBuilder: (context, index) {
+                                          final message = _messages[index];
+                                          return _buildMessageBubble(message);
+                                        },
+                                      ),
+                              ),
+                              // Audio processing animation
+                              AudioProcessingAnimation(
+                                isActive: liveSessionState.isWaitingForResponse,
+                                message: liveSessionState.isWaitingForResponse
+                                    ? '⏳ Processing audio...'
+                                    : liveSessionState.isRecording
+                                    ? (liveSessionState.isConnected
+                                    ? '🎤 Listening...'
+                                    : '🎤 Recording (offline)')
+                                    : 'Ready to listen',
+                                color: liveSessionState.isWaitingForResponse
+                                    ? Colors.blue
+                                    : liveSessionState.isConnected
+                                    ? Colors.green
+                                    : Colors.orange,
+                              ),
+
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -477,9 +623,9 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                       maxLines: 2,
                       minLines: 1,
                     ),
-                    
+
                     const SizedBox(height: 12),
-                    
+
                     // Controls row
                     Row(
                       children: [
@@ -541,7 +687,7 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                               const SizedBox(height: 2),
                               Text(
                                 liveSessionState.isRecording
-                                    ? liveSessionState.isConnected 
+                                    ? liveSessionState.isConnected
                                         ? 'Sending audio to server for transcription'
                                         : 'Recording audio (offline mode)'
                                     : 'Start recording to test microphone',
@@ -557,9 +703,6 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
                         ),
 
                         const SizedBox(width: 8),
-
-                        // Language indicator
-                        const LanguageIndicator(),
                       ],
                     ),
                   ],
@@ -648,18 +791,19 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
   }
 
   String _formatTimestamp(DateTime timestamp) {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
+    // final now = DateTime.now();
+    // final difference = now.difference(timestamp);
 
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inDays < 1) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
+    return '';
+    // if (difference.inMinutes < 1) {
+    //   return 'Just now';
+    // } else if (difference.inHours < 1) {
+    //   return '${difference.inMinutes}m ago';
+    // } else if (difference.inDays < 1) {
+    //   return '${difference.inHours}h ago';
+    // } else {
+    //   return '${difference.inDays}d ago';
+    // }
   }
 
   void _showSettings() {
@@ -672,19 +816,6 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Language Settings
-              const Text(
-                'Language',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const LanguageSelector(showAsDialog: false),
-              const SizedBox(height: 16),
-              
-              
               // Additional Settings
               const Text(
                 'Additional Settings',
@@ -717,124 +848,6 @@ class _LiveTranscriptionScreenState extends ConsumerState<LiveTranscriptionScree
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _copyTranscript() {
-    final transcript = _messages
-        .where((msg) => !msg.isSystemMessage)
-        .map((msg) => msg.text)
-        .join('\n');
-
-    if (transcript.isNotEmpty) {
-      // TODO: Implement actual clipboard functionality
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Transcript copied to clipboard'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No transcript to copy'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
-
-  void _selectConversation() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Conversation'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Choose a conversation to load:',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            // Sample conversations
-            ListTile(
-              leading: const Icon(Icons.chat_bubble_outline),
-              title: const Text('Current Session'),
-              subtitle: Text('${_messages.length} messages'),
-              onTap: () {
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Loaded current session'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Previous Session 1'),
-              subtitle: const Text('15 messages • 2 hours ago'),
-              onTap: () {
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Loaded previous session 1'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Previous Session 2'),
-              subtitle: const Text('8 messages • Yesterday'),
-              onTap: () {
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Loaded previous session 2'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('Start New Conversation'),
-              onTap: () {
-                Navigator.of(context).pop();
-                setState(() {
-                  _messages.clear();
-                  _messages.add(
-                    TranscriptMessage(
-                      id: 'welcome',
-                      text: 'Welcome to Live Transcription! Tap the microphone to start speaking.',
-                      timestamp: DateTime.now(),
-                      isSystemMessage: true,
-                    ),
-                  );
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Started new conversation'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
           ),
         ],
       ),

@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/gradient_background.dart';
 import 'live_transcription_screen.dart';
-import '../test/screens/audio_test_screen.dart';
-import '../test/screens/vad_test_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -17,13 +15,13 @@ class HomeScreen extends ConsumerWidget {
     return Scaffold(
       body: GradientBackground(
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Header with user info and logout
-                Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header with user info and logout (with padding)
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Column(
@@ -58,164 +56,107 @@ class HomeScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
-                
-                const SizedBox(height: 40),
-                
-                // Main content card
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.1),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
+              ),
+              
+              const SizedBox(height: 30),
+              
+              // Main content card (full width and height)
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(34),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Dashboard',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF2D3748),
-                          ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Features',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2D3748),
                         ),
-                        const SizedBox(height: 16),
-                        
-                        // User info section
-                        // Container(
-                        //   padding: const EdgeInsets.all(16),
-                        //   decoration: BoxDecoration(
-                        //     color: const Color(0xFFF7FAFC),
-                        //     borderRadius: BorderRadius.circular(12),
-                        //     border: Border.all(
-                        //       color: const Color(0xFFE2E8F0),
-                        //     ),
-                        //   ),
-                        //   child: Column(
-                        //     crossAxisAlignment: CrossAxisAlignment.start,
-                        //     children: [
-                        //       const Text(
-                        //         'Account Information',
-                        //         style: TextStyle(
-                        //           fontSize: 16,
-                        //           fontWeight: FontWeight.w600,
-                        //           color: Color(0xFF2D3748),
-                        //         ),
-                        //       ),
-                        //       const SizedBox(height: 12),
-                        //       _buildInfoRow('Email', user?.email ?? 'N/A'),
-                        //       _buildInfoRow('User ID', user?.id ?? 'N/A'),
-                        //       if (user?.cognitoId != null)
-                        //         _buildInfoRow('Cognito ID', user!.cognitoId!),
-                        //       if (user?.tokenType != null)
-                        //         _buildInfoRow('Token Type', user!.tokenType!),
-                        //       if (user?.expiresIn != null)
-                        //         _buildInfoRow('Expires In', '${user!.expiresIn!} seconds'),
-                        //     ],
-                        //   ),
-                        // ),
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Features section
-                        const Text(
-                          'Features',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF2D3748),
-                          ),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      const SizedBox(height: 24),
+                      
+                      // Features section
+                      // const Text(
+                      //   'Features',
+                      //   style: TextStyle(
+                      //     fontSize: 16,
+                      //     fontWeight: FontWeight.w600,
+                      //     color: Color(0xFF2D3748),
+                      //   ),
+                      // ),
+                      // const SizedBox(height: 12),
+                      
+                      // Feature cards
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            // Calculate responsive grid based on screen width
+                            final screenWidth = constraints.maxWidth;
+                            final crossAxisCount = screenWidth > 600 ? 3 : 2; // 3 columns for larger screens, 2 for mobile
+                            final spacing = screenWidth > 400 ? 12.0 : 8.0;
+                            
+                            return GridView.count(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: spacing,
+                              mainAxisSpacing: spacing,
+                              childAspectRatio: 1.1, // Make cards slightly taller
+                              children: [
+                                _buildFeatureCard(
+                                  icon: Icons.mic,
+                                  title: 'Live',
+                                  subtitle: 'Transcription\nReal-time notes',
+                                  color: const Color(0xFF3182CE),
+                                  onTap: () => _navigateToLiveTranscription(context),
+                                ),
+                                _buildFeatureCard(
+                                  icon: Icons.translate,
+                                  title: 'Hold to Translate',
+                                  subtitle: 'Tap & Talk\nSpeak & Transcribe',
+                                  color: const Color(0xFF38A169),
+                                  onTap: () => _showComingSoon(context, 'Hold to Translate'),
+                                ),
+                                _buildFeatureCard(
+                                  icon: Icons.sync,
+                                  title: 'Synced',
+                                  subtitle: 'Transcription\nMirror to Plugin',
+                                  color: const Color(0xFFD69E2E),
+                                  onTap: () => _showComingSoon(context, 'Synced Transcription'),
+                                ),
+                                _buildFeatureCard(
+                                  icon: Icons.settings,
+                                  title: 'Settings',
+                                  subtitle: 'Preferences',
+                                  color: const Color(0xFF805AD5),
+                                  onTap: () => _showComingSoon(context, 'Settings'),
+                                ),
+                              ],
+                            );
+                          },
                         ),
-                        const SizedBox(height: 12),
-                        
-                        // Feature cards
-                        Expanded(
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              // Calculate responsive grid based on screen width
-                              final screenWidth = constraints.maxWidth;
-                              final crossAxisCount = screenWidth > 600 ? 3 : 2; // 3 columns for larger screens, 2 for mobile
-                              final spacing = screenWidth > 400 ? 12.0 : 8.0;
-                              
-                              return GridView.count(
-                                crossAxisCount: crossAxisCount,
-                                crossAxisSpacing: spacing,
-                                mainAxisSpacing: spacing,
-                                childAspectRatio: 1.1, // Make cards slightly taller
-                                children: [
-                                  _buildFeatureCard(
-                                    icon: Icons.mic,
-                                    title: 'Live',
-                                    subtitle: 'Transcription\nReal-time notes',
-                                    color: const Color(0xFF3182CE),
-                                    onTap: () => _navigateToLiveTranscription(context),
-                                  ),
-                                  _buildFeatureCard(
-                                    icon: Icons.translate,
-                                    title: 'Hold to Translate',
-                                    subtitle: 'Tap & Talk\nSpeak & Transcribe',
-                                    color: const Color(0xFF38A169),
-                                    onTap: () => _showComingSoon(context, 'Hold to Translate'),
-                                  ),
-                                  _buildFeatureCard(
-                                    icon: Icons.sync,
-                                    title: 'Synced',
-                                    subtitle: 'Transcription\nMirror to Plugin',
-                                    color: const Color(0xFFD69E2E),
-                                    onTap: () => _showComingSoon(context, 'Synced Transcription'),
-                                  ),
-                                  _buildFeatureCard(
-                                    icon: Icons.settings,
-                                    title: 'Settings',
-                                    subtitle: 'Preferences',
-                                    color: const Color(0xFF805AD5),
-                                    onTap: () => _showComingSoon(context, 'Settings'),
-                                  ),
-                                  _buildFeatureCard(
-                                    icon: Icons.science,
-                                    title: 'Audio Test',
-                                    subtitle: 'Test Dual-Lane\nAudio Streaming',
-                                    color: const Color(0xFFE53E3E),
-                                    onTap: () => _navigateToAudioTest(context),
-                                  ),
-                                  _buildFeatureCard(
-                                    icon: Icons.bug_report,
-                                    title: 'VAD Test',
-                                    subtitle: 'Debug VAD\nPackage Issues',
-                                    color: const Color(0xFF9F7AEA),
-                                    onTap: () => _navigateToVADTest(context),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-                
-                const SizedBox(height: 20),
-                
-                // Footer
-                const Text(
-                  '© 2024 QikAid. All rights reserved.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white70,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -285,22 +226,6 @@ class HomeScreen extends ConsumerWidget {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const LiveTranscriptionScreen(),
-      ),
-    );
-  }
-
-  void _navigateToAudioTest(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const AudioTestScreen(),
-      ),
-    );
-  }
-
-  void _navigateToVADTest(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const VADTestScreen(),
       ),
     );
   }

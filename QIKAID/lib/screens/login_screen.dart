@@ -6,8 +6,6 @@ import '../widgets/gradient_background.dart';
 import '../widgets/custom_text_field.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/forgot_password_dialog.dart';
-import '../widgets/verification_code_dialog.dart';
-import '../test/screens/debug_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -54,13 +52,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   //   );
   // }
 
-  void _testVerificationDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => const VerificationCodeDialog(email: 'test@example.com'),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,39 +73,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     return Scaffold(
       body: GradientBackground(
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Debug buttons in top-right corner
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      onPressed: _testVerificationDialog,
-                      icon: const Icon(
-                        Icons.verified_user,
-                        color: Colors.white70,
-                        size: 20,
-                      ),
-                      tooltip: 'Test Verification Dialog',
-                    ),
-                    const SizedBox(width: 8),
-                    // IconButton(
-                    //   onPressed: _showDebugScreen,
-                    //   icon: const Icon(
-                    //     Icons.bug_report,
-                    //     color: Colors.white70,
-                    //     size: 20,
-                    //   ),
-                    //   tooltip: 'API Debug',
-                    // ),
-                  ],
-                ),
-              ),
-              // Main content
-              Expanded(
+        child: Column(
+          children: [
+            // Main content
+            Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24.0),
                   child: Form(
@@ -123,7 +85,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // const SizedBox(height: 10),
-                  
+
                   // Logo and Welcome Section
                   Column(
                     children: [
@@ -161,9 +123,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ],
                   ),
-                  
+
                   const SizedBox(height: 60),
-                  
+
                   // Login Card
                   Container(
                     padding: const EdgeInsets.all(24),
@@ -198,7 +160,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 32),
-                        
+
                         // Email Field
                         CustomTextField(
                           controller: _emailController,
@@ -217,9 +179,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 20),
-                        
+
                         // Password Field
                         CustomTextField(
                           controller: _passwordController,
@@ -247,18 +209,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 32),
-                        
+
                         // Sign In Button
                         CustomButton(
                           text: 'Sign in',
                           isLoading: authState.isLoading,
                           onPressed: _handleLogin,
                         ),
-                        
+
                         const SizedBox(height: 16),
-                        
+
                         // Offline Mode Indicator
                         if (isOfflineMode)
                           Container(
@@ -289,9 +251,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ],
                             ),
                           ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Action Links
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -323,9 +285,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ],
                     ),
                   ),
-                  
+
                   const SizedBox(height: 40),
-                  
+
                   // Footer
                   const Text(
                     '© 2024 QikAid. All rights reserved.',
@@ -340,8 +302,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
