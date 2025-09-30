@@ -7,7 +7,7 @@ import '../widgets/custom_text_field.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/forgot_password_dialog.dart';
 import '../widgets/verification_code_dialog.dart';
-import 'debug_screen.dart';
+import '../test/screens/debug_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/live_session_provider.dart';
-import '../providers/auth_provider.dart';
-import '../widgets/gradient_background.dart';
+import '../../providers/live_session_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../widgets/gradient_background.dart';
 
 class AudioTestScreen extends ConsumerStatefulWidget {
   const AudioTestScreen({super.key});

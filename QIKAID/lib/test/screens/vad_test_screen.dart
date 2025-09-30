@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/audio_test_service.dart';
-import '../widgets/gradient_background.dart';
+import '../../widgets/gradient_background.dart';
 
 class VADTestScreen extends ConsumerStatefulWidget {
   const VADTestScreen({super.key});

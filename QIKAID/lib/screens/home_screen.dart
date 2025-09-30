@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/gradient_background.dart';
 import 'live_transcription_screen.dart';
-import 'audio_test_screen.dart';
-import 'vad_test_screen.dart';
+import '../test/screens/audio_test_screen.dart';
+import '../test/screens/vad_test_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
