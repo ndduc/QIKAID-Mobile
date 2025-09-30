@@ -73,7 +73,7 @@ class WebSocketService {
         print('🔌 WEBSOCKET: Connecting to: $wsUrl');
         
         // Connect to ngrok WebSocket with authentication
-        final authenticatedUriString = '$wsUrl?access_token=${Uri.encodeComponent(accessToken)}&cognitoId=${Uri.encodeComponent(cognitoId)}&user_identifier=${Uri.encodeComponent('ndduc01@gmail.com')}&userIdForBinary=${Uri.encodeComponent('f798ed40-f850-41fd-9a65-4d787fa6a21d')}&profileIdForBinary=${Uri.encodeComponent('d479e65d-0f5a-4527-a473-203c9ce2062a')}';
+        final authenticatedUriString = '$wsUrl?access_token=${Uri.encodeComponent(accessToken)}&cognitoId=${Uri.encodeComponent(cognitoId)}&user_identifier=${Uri.encodeComponent('ndduc01@gmail.com')}&userIdForBinary=${Uri.encodeComponent('f798ed40-f850-41fd-9a65-4d787fa6a21d')}&profileIdForBinary=${Uri.encodeComponent('d479e65d-0f5a-4527-a473-203c9ce2062a')}&meetingSessionId=${Uri.encodeComponent(_sessionId!)}';
         final authenticatedUri = Uri.parse(authenticatedUriString);
         
         print('🔌 WEBSOCKET: Connecting to ngrok WebSocket: $authenticatedUri');
@@ -189,12 +189,66 @@ class WebSocketService {
     }
     
     try {
+      // Debug: Check WebSocket state before sending
+      print('🔍 WEBSOCKET DEBUG: Before sending PCM frame');
+      print('   - Channel exists: ${_channel != null}');
+      print('   - Is connected: $_isConnected');
+      print('   - Streaming started: $_isStreamingStarted');
+      print('   - Close code: ${_channel?.closeCode}');
+      
       // Send as binary frame
       _channel!.sink.add(pcmFrame);
       _addToDedupMap(pcmFrame);
-      print('📤 WEBSOCKET: Sent PCM frame (${pcmFrame.length} bytes)');
+      print('📤 WEBSOCKET: Sent PCM frame (${pcmFrame.length} bytes) - Binary: ${pcmFrame.runtimeType}');
+      
+      // Debug: Verify it's actually binary data
+      if (pcmFrame is Uint8List) {
+        print('✅ WEBSOCKET: Confirmed binary data type: Uint8List');
+        print('   - First 4 bytes: ${pcmFrame.take(4).toList()}');
+        print('   - Last 4 bytes: ${pcmFrame.skip(pcmFrame.length - 4).take(4).toList()}');
+      } else {
+        print('⚠️ WEBSOCKET: Unexpected data type: ${pcmFrame.runtimeType}');
+      }
     } catch (e) {
       print('❌ WEBSOCKET PCM FRAME ERROR: $e');
+    }
+  }
+  
+  /// Send utterance audio data as binary frame (similar to sendPcmFrame)
+  Future<void> sendUtteranceFrame(Uint8List utteranceFrame) async {
+    if (!_isConnected || _channel == null || _currentUtteranceId == null) {
+      return;
+    }
+    
+    // Check for duplicate audio data
+    if (_isDuplicateAudioData(utteranceFrame)) {
+      print('🚫 WEBSOCKET: Skipping duplicate utterance frame (${utteranceFrame.length} bytes)');
+      return;
+    }
+    
+    try {
+      // Debug: Check WebSocket state before sending
+      print('🔍 WEBSOCKET DEBUG: Before sending utterance frame');
+      print('   - Channel exists: ${_channel != null}');
+      print('   - Is connected: $_isConnected');
+      print('   - Current utterance ID: $_currentUtteranceId');
+      print('   - Close code: ${_channel?.closeCode}');
+      
+      // Send as binary frame
+      _channel!.sink.add(utteranceFrame);
+      _addToDedupMap(utteranceFrame);
+      print('📤 WEBSOCKET: Sent utterance frame (${utteranceFrame.length} bytes) - Binary: ${utteranceFrame.runtimeType}');
+      
+      // Debug: Verify it's actually binary data
+      if (utteranceFrame is Uint8List) {
+        print('✅ WEBSOCKET: Confirmed binary data type: Uint8List');
+        print('   - First 4 bytes: ${utteranceFrame.take(4).toList()}');
+        print('   - Last 4 bytes: ${utteranceFrame.skip(utteranceFrame.length - 4).take(4).toList()}');
+      } else {
+        print('⚠️ WEBSOCKET: Unexpected data type: ${utteranceFrame.runtimeType}');
+      }
+    } catch (e) {
+      print('❌ WEBSOCKET UTTERANCE FRAME ERROR: $e');
     }
   }
   
@@ -215,6 +269,7 @@ class WebSocketService {
         'totalBytes': totalBytes,
         'timestamp': DateTime.now().toIso8601String(),
         'sessionId': _sessionId,
+        'origin': 'MOBILE'
       };
       
       print('🎤 WEBSOCKET: Starting utterance $utteranceId ($totalBytes bytes)');
@@ -238,6 +293,7 @@ class WebSocketService {
         'utteranceId': _currentUtteranceId,
         'timestamp': DateTime.now().toIso8601String(),
         'sessionId': _sessionId,
+        'origin': 'MOBILE'
       };
       
       print('🎤 WEBSOCKET: Ending utterance $_currentUtteranceId');

@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/gradient_background.dart';
 import 'live_transcription_screen.dart';
 import 'audio_test_screen.dart';
+import 'vad_test_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -185,6 +186,13 @@ class HomeScreen extends ConsumerWidget {
                                     color: const Color(0xFFE53E3E),
                                     onTap: () => _navigateToAudioTest(context),
                                   ),
+                                  _buildFeatureCard(
+                                    icon: Icons.bug_report,
+                                    title: 'VAD Test',
+                                    subtitle: 'Debug VAD\nPackage Issues',
+                                    color: const Color(0xFF9F7AEA),
+                                    onTap: () => _navigateToVADTest(context),
+                                  ),
                                 ],
                               );
                             },
@@ -285,6 +293,14 @@ class HomeScreen extends ConsumerWidget {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const AudioTestScreen(),
+      ),
+    );
+  }
+
+  void _navigateToVADTest(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const VADTestScreen(),
       ),
     );
   }

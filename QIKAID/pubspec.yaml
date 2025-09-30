@@ -59,8 +59,11 @@ dependencies:
   # WebSocket support
   web_socket_channel: ^2.4.0
   
-  # Audio recording for live sessions
-  flutter_sound: ^9.2.13
+  # Voice Activity Detection
+  vad: ^0.0.6
+  
+  # Audio recording for live sessions (replaced by VAD package)
+  # flutter_sound: ^9.2.13
   
   # Audio format conversion
   # audio_waveforms: ^1.0.5

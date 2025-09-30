@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/websocket_service.dart';
-import '../services/audio_recording_service_v2.dart';
+import '../services/audio_recording_service_vad.dart';
 
 /// Live session state
 class LiveSessionState {
@@ -48,7 +48,7 @@ class LiveSessionState {
 /// Live session notifier
 class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
   final WebSocketService _webSocketService;
-  final AudioRecordingService _audioRecordingService;
+  final AudioRecordingServiceVAD _audioRecordingService;
   
   StreamSubscription? _wsMessageSubscription;
   StreamSubscription? _wsErrorSubscription;
@@ -324,14 +324,14 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
     }
   }
   
-  /// Send utterance data in chunks
+  /// Send utterance data in chunks using dedicated utterance frame method
   void _sendUtteranceInChunks(Uint8List audioData) {
     const chunkSize = 16 * 1024; // 16KB chunks
     
     for (var i = 0; i < audioData.length; i += chunkSize) {
       final end = (i + chunkSize > audioData.length) ? audioData.length : i + chunkSize;
       final chunk = Uint8List.sublistView(audioData, i, end);
-      _webSocketService.sendPcmFrame(chunk);
+      _webSocketService.sendUtteranceFrame(chunk);
     }
   }
   
@@ -391,8 +391,8 @@ final liveSessionServiceProvider = Provider<WebSocketService>((ref) {
 });
 
 /// Audio recording service provider
-final audioRecordingServiceProvider = Provider<AudioRecordingService>((ref) {
-  final service = AudioRecordingService();
+final audioRecordingServiceProvider = Provider<AudioRecordingServiceVAD>((ref) {
+  final service = AudioRecordingServiceVAD();
   ref.onDispose(() {
     service.dispose();
   });

@@ -8,7 +8,7 @@ class ApiConfig {
   static const String _androidEmulatorWS = 'ws://10.0.2.2:8080'; // Android emulator WebSocket
   static const String _localSimulatorWS = 'ws://192.168.50.1:8080'; // iOS simulator WebSocket
   static const String _networkIPWS = 'wss://api.qikaid.com/comprehend/ws/transcript'; // Production WebSocket
-  static const String _ngrokWS = 'wss://0fef64c8969b.ngrok-free.app/comprehend/ws/transcript'; // Ngrok WebSocket
+  static const String _ngrokWS = 'wss://7ff93a3b1224.ngrok-free.app/comprehend/ws/transcript'; // Ngrok WebSocket
 
   // Current configuration - change this based on your setup
   static const String authBaseUrl = _networkIPAuth; // Default to production auth
