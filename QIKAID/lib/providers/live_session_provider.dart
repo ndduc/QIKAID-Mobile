@@ -232,6 +232,9 @@ class LiveSessionNotifier extends StateNotifier<LiveSessionState> {
       // Test utterance stream before starting recording
       testUtteranceStream();
       
+      // Clear any previous error state before starting
+      _audioRecordingService.clearError();
+      
       // Start audio recording
       await _audioRecordingService.startRecording();
       

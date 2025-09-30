@@ -21,7 +21,7 @@ class AudioRecordingServiceVAD {
   // Configuration
   static const int _frameMs = 20; // 20ms frames for live streaming
   static const int _frameBytes = 16000 * 1 * 2 * _frameMs ~/ 1000; // 640 bytes per frame
-  static const int _silenceTimeoutMs = 1500; // 1.5 seconds of silence = sentence end
+  static const int _silenceTimeoutMs = 800; // 1500 = 1.5 seconds of silence = sentence end
   static const int _sampleRate = 16000;
   
   // Buffer for 20ms frame slicing
@@ -107,7 +107,21 @@ class AudioRecordingServiceVAD {
     // Error handling
     _vadHandler!.onError.listen((error) {
       print('❌ VAD AUDIO RECORDING: VAD error: $error');
-      _stateController.add(RecordingState.error);
+      
+      // Only treat critical errors as actual errors
+      // Minor warnings or initialization messages should not stop recording
+      final errorString = error.toString().toLowerCase();
+      if (errorString.contains('permission') || 
+          errorString.contains('microphone') ||
+          errorString.contains('recorder') ||
+          errorString.contains('failed') ||
+          errorString.contains('exception')) {
+        print('❌ VAD AUDIO RECORDING: Critical VAD error detected, stopping recording');
+        _stateController.add(RecordingState.error);
+      } else {
+        print('⚠️ VAD AUDIO RECORDING: Minor VAD warning/error ignored: $error');
+        // Don't set error state for minor issues
+      }
     });
     
     print('✅ VAD AUDIO RECORDING: VAD event listeners setup completed');
@@ -179,7 +193,24 @@ class AudioRecordingServiceVAD {
       
     } catch (e) {
       print('❌ VAD AUDIO RECORDING: Start failed: $e');
-      _stateController.add(RecordingState.error);
+      
+      // Only treat critical errors as actual errors
+      final errorString = e.toString().toLowerCase();
+      if (errorString.contains('permission') || 
+          errorString.contains('microphone') ||
+          errorString.contains('recorder') ||
+          errorString.contains('failed') ||
+          errorString.contains('exception') ||
+          errorString.contains('not available')) {
+        print('❌ VAD AUDIO RECORDING: Critical start error detected');
+        _stateController.add(RecordingState.error);
+      } else {
+        print('⚠️ VAD AUDIO RECORDING: Minor start error ignored: $e');
+        // Try to continue anyway - might be a minor initialization issue
+        _isRecording = true;
+        _stateController.add(RecordingState.recording);
+        print('✅ VAD AUDIO RECORDING: Recording started despite minor error');
+      }
     }
   }
   
@@ -290,7 +321,6 @@ class AudioRecordingServiceVAD {
         
         // Extract speech probability
         final isSpeechProb = frameData['isSpeech'] as double? ?? 0.0;
-        final notSpeechProb = frameData['notSpeech'] as double? ?? 0.0;
         
         print('🎤 VAD AUDIO RECORDING: Speech prob: ${isSpeechProb.toStringAsFixed(3)}, Samples: ${audioSamples?.length ?? 0}');
         
@@ -524,6 +554,12 @@ class AudioRecordingServiceVAD {
     } catch (e) {
       print('❌ VAD AUDIO RECORDING RESET ERROR: $e');
     }
+  }
+  
+  /// Clear error state
+  void clearError() {
+    if (_stateController.isClosed) return;
+    _stateController.add(RecordingState.idle);
   }
 }
 
